@@ -44,8 +44,12 @@ def ref_backend_backend(
                     raise RefBackendError(f"Unsupported call_function: {node.target}")
                 resolved_args = resolve_arg(node.args, env)
                 resolved_kwargs = dict(resolve_arg(node.kwargs, env))
-                args_values = list(resolved_args)
+                if isinstance(resolved_args, (tuple, list)):
+                    args_values = list(resolved_args)
+                else:
+                    args_values = [resolved_args]
                 alpha = resolved_kwargs.pop("alpha", None)
+                other_arg = resolved_kwargs.pop("other", None)
                 out_arg = resolved_kwargs.pop("out", None)
                 if resolved_kwargs:
                     raise RefBackendError(
@@ -54,7 +58,11 @@ def ref_backend_backend(
                 if out_arg is not None:
                     raise RefBackendError("add does not support out= in this backend")
                 if len(args_values) < 2:
-                    raise RefBackendError("add expects at least two inputs")
+                    if other_arg is None:
+                        raise RefBackendError("add expects at least two inputs")
+                    args_values.append(other_arg)
+                elif other_arg is not None:
+                    raise RefBackendError("add received multiple values for other")
                 if len(args_values) > 2:
                     if alpha is not None:
                         raise RefBackendError("add received multiple alpha values")
