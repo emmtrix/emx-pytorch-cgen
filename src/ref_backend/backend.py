@@ -49,7 +49,9 @@ def ref_backend_backend(
                 else:
                     args_values = [resolved_args]
                 alpha = resolved_kwargs.pop("alpha", None)
-                other_arg = resolved_kwargs.pop("other", None)
+                other_kw = resolved_kwargs.pop("other", None)
+                self_kw = resolved_kwargs.pop("self", None)
+                input_kw = resolved_kwargs.pop("input", None)
                 out_arg = resolved_kwargs.pop("out", None)
                 if resolved_kwargs:
                     raise RefBackendError(
@@ -57,21 +59,30 @@ def ref_backend_backend(
                     )
                 if out_arg is not None:
                     raise RefBackendError("add does not support out= in this backend")
-                if len(args_values) < 2:
-                    if other_arg is None:
-                        raise RefBackendError("add expects at least two inputs")
-                    args_values.append(other_arg)
-                elif other_arg is not None:
-                    raise RefBackendError("add received multiple values for other")
                 if len(args_values) > 2:
                     if alpha is not None:
                         raise RefBackendError("add received multiple alpha values")
                     alpha = args_values[2]
+                a = args_values[0] if len(args_values) > 0 else None
+                b = args_values[1] if len(args_values) > 1 else None
+                if self_kw is not None:
+                    if a is not None:
+                        raise RefBackendError("add received multiple values for self")
+                    a = self_kw
+                if input_kw is not None:
+                    if a is not None:
+                        raise RefBackendError("add received multiple values for input")
+                    a = input_kw
+                if other_kw is not None:
+                    if b is not None:
+                        raise RefBackendError("add received multiple values for other")
+                    b = other_kw
+                if a is None or b is None:
+                    raise RefBackendError("add expects two tensor inputs")
                 if alpha is None:
                     alpha = 1
                 if alpha != 1:
                     raise RefBackendError("add supports only alpha=1")
-                a, b = args_values[:2]
                 if not isinstance(a, torch.Tensor) or not isinstance(b, torch.Tensor):
                     raise RefBackendError("add expects tensor inputs only")
                 result = _run_add(a, b)
