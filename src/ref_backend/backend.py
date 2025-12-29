@@ -43,7 +43,7 @@ def ref_backend_backend(
                 if node.target not in supported_targets:
                     raise RefBackendError(f"Unsupported call_function: {node.target}")
                 resolved_args = resolve_arg(node.args, env)
-                resolved_kwargs = resolve_arg(node.kwargs, env)
+                resolved_kwargs = dict(resolve_arg(node.kwargs, env))
                 args_values = list(resolved_args)
                 alpha = resolved_kwargs.pop("alpha", None)
                 out_arg = resolved_kwargs.pop("out", None)
