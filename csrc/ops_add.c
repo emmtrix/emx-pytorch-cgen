@@ -54,39 +54,54 @@ static void add_f32(const float *a_data, const float *b_data, float *out_data, i
     }
 }
 
-static void add_f32_strided(const float *a_data, const float *b_data, float *out_data,
-                            int32_t ndim, const int64_t *sizes, const int64_t *a_strides,
-                            const int64_t *b_strides, const int64_t *out_strides) {
-    if (ndim <= 0) {
-        out_data[0] = a_data[0] + b_data[0];
-        return;
-    }
-
-    int64_t total = 1;
-    for (int32_t d = 0; d < ndim; ++d) {
-        total *= sizes[d];
-    }
-    int64_t indices[ndim];
-    for (int32_t d = 0; d < ndim; ++d) {
-        indices[d] = 0;
-    }
-
-    for (int64_t i = 0; i < total; ++i) {
-        int64_t a_offset = 0;
-        int64_t b_offset = 0;
-        int64_t out_offset = 0;
-        for (int32_t d = 0; d < ndim; ++d) {
-            a_offset += indices[d] * a_strides[d];
-            b_offset += indices[d] * b_strides[d];
-            out_offset += indices[d] * out_strides[d];
-        }
-        out_data[out_offset] = a_data[a_offset] + b_data[b_offset];
-        for (int32_t d = ndim - 1; d >= 0; --d) {
-            indices[d] += 1;
-            if (indices[d] < sizes[d]) {
-                break;
+static void add_f32_strided(
+    const float *a_data,
+    const float *b_data,
+    float *out_data,
+    const int64_t sizes[8],
+    const int64_t a_strides[8],
+    const int64_t b_strides[8],
+    const int64_t out_strides[8]
+) {
+    for (int64_t i0 = 0; i0 < sizes[0]; ++i0) {
+        for (int64_t i1 = 0; i1 < sizes[1]; ++i1) {
+            for (int64_t i2 = 0; i2 < sizes[2]; ++i2) {
+                for (int64_t i3 = 0; i3 < sizes[3]; ++i3) {
+                    for (int64_t i4 = 0; i4 < sizes[4]; ++i4) {
+                        for (int64_t i5 = 0; i5 < sizes[5]; ++i5) {
+                            for (int64_t i6 = 0; i6 < sizes[6]; ++i6) {
+                                for (int64_t i7 = 0; i7 < sizes[7]; ++i7) {
+                                    int64_t a_offset = i0 * a_strides[0]
+                                        + i1 * a_strides[1]
+                                        + i2 * a_strides[2]
+                                        + i3 * a_strides[3]
+                                        + i4 * a_strides[4]
+                                        + i5 * a_strides[5]
+                                        + i6 * a_strides[6]
+                                        + i7 * a_strides[7];
+                                    int64_t b_offset = i0 * b_strides[0]
+                                        + i1 * b_strides[1]
+                                        + i2 * b_strides[2]
+                                        + i3 * b_strides[3]
+                                        + i4 * b_strides[4]
+                                        + i5 * b_strides[5]
+                                        + i6 * b_strides[6]
+                                        + i7 * b_strides[7];
+                                    int64_t out_offset = i0 * out_strides[0]
+                                        + i1 * out_strides[1]
+                                        + i2 * out_strides[2]
+                                        + i3 * out_strides[3]
+                                        + i4 * out_strides[4]
+                                        + i5 * out_strides[5]
+                                        + i6 * out_strides[6]
+                                        + i7 * out_strides[7];
+                                    out_data[out_offset] = a_data[a_offset] + b_data[b_offset];
+                                }
+                            }
+                        }
+                    }
+                }
             }
-            indices[d] = 0;
         }
     }
 }
@@ -109,6 +124,10 @@ int ref_run_add(const RefOpCall *call, char *err_msg, size_t err_cap) {
         write_error(err_msg, err_cap, "add requires inputs and output to have identical shapes");
         return 3;
     }
+    if (a->ndim > 8) {
+        write_error(err_msg, err_cap, "add supports at most 8 dimensions");
+        return 4;
+    }
 
     int64_t total = numel(a);
     float *a_data = (float *)a->data;
@@ -118,15 +137,26 @@ int ref_run_add(const RefOpCall *call, char *err_msg, size_t err_cap) {
         add_f32(a_data, b_data, out_data, total);
         return 0;
     }
+    int64_t sizes_8[8] = {1, 1, 1, 1, 1, 1, 1, 1};
+    int64_t a_strides_8[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+    int64_t b_strides_8[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+    int64_t out_strides_8[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+    int32_t offset = 8 - a->ndim;
+    for (int32_t d = 0; d < a->ndim; ++d) {
+        int32_t dst = offset + d;
+        sizes_8[dst] = a->sizes[d];
+        a_strides_8[dst] = a->strides[d];
+        b_strides_8[dst] = b->strides[d];
+        out_strides_8[dst] = out->strides[d];
+    }
     add_f32_strided(
         a_data,
         b_data,
         out_data,
-        a->ndim,
-        a->sizes,
-        a->strides,
-        b->strides,
-        out->strides
+        sizes_8,
+        a_strides_8,
+        b_strides_8,
+        out_strides_8
     );
     return 0;
 }
