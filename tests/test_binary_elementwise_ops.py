@@ -4,23 +4,18 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_methods_invocations import SampleInput, op_db
 from torch.testing._internal.common_utils import TestCase, run_tests
 
-from ref_backend.cffi_bindings import run_add, run_mul, run_sub
+from ref_backend.backend import ref_backend_backend
+from ref_backend.cffi_bindings import RefBackendError
 
 
 ADD_SUB_OPS = [op for op in op_db if op.name in ("add", "sub", "mul")]
 
 
-def _run_ref_op(op_name: str, a: torch.Tensor, b: torch.Tensor, out: torch.Tensor) -> None:
-    if op_name == "add":
-        run_add(a, b, out)
-        return
-    if op_name == "sub":
-        run_sub(a, b, out)
-        return
-    if op_name == "mul":
-        run_mul(a, b, out)
-        return
-    raise ValueError(f"Unsupported op name: {op_name}")
+def _compile_op(op):
+    def compiled_fn(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+        return op(a, b)
+
+    return torch.compile(compiled_fn, backend=ref_backend_backend)
 
 
 def _iter_supported_samples(op, device, dtype):
@@ -53,29 +48,29 @@ def _iter_supported_samples(op, device, dtype):
 class TestAddSubOpInfo(TestCase):
     @ops(ADD_SUB_OPS, allowed_dtypes=(torch.float32,))
     def test_ref_backend_matches_eager(self, device, dtype, op):
+        compiled = _compile_op(op)
         for sample in _iter_supported_samples(op, device, dtype):
             a = sample.input
             b = sample.args[0]
-            out = torch.empty_like(a)
-            _run_ref_op(op.name, a, b, out)
-            expected = op(a, b)
-            torch.testing.assert_close(out, expected)
+            result = compiled(a, b)
+            torch.testing.assert_close(result, op(a, b))
 
     @ops(ADD_SUB_OPS, allowed_dtypes=(torch.float32,))
     def test_ref_backend_rejects_invalid_shapes(self, device, dtype, op):
+        compiled = _compile_op(op)
         too_many_dims = torch.randn((1,) * 9, device=device, dtype=dtype)
-        out = torch.empty_like(too_many_dims)
-        with pytest.raises(RuntimeError, match=f"{op.name} supports at most 8 dimensions"):
-            _run_ref_op(op.name, too_many_dims, too_many_dims, out)
+        with pytest.raises(
+            RefBackendError, match=f"{op.name} supports at most 8 dimensions"
+        ):
+            compiled(too_many_dims, too_many_dims)
 
         a = torch.randn((2, 3), device=device, dtype=dtype)
         b = torch.randn((2, 4), device=device, dtype=dtype)
-        out = torch.empty_like(a)
         with pytest.raises(
-            RuntimeError,
+            RefBackendError,
             match=f"{op.name} requires inputs and output to have identical shapes",
         ):
-            _run_ref_op(op.name, a, b, out)
+            compiled(a, b)
 
 
 instantiate_device_type_tests(TestAddSubOpInfo, globals(), only_for="cpu")
