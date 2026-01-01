@@ -12,6 +12,7 @@ from .cffi_bindings import (
     run_add,
     run_bmm,
     run_broadcast_in_dim,
+    run_div,
     run_matmul,
     run_mul,
     run_sub,
@@ -33,6 +34,12 @@ def _run_sub(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
 def _run_mul(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
     out = torch.empty_like(a, memory_format=torch.contiguous_format)
     run_mul(a, b, out)
+    return out
+
+
+def _run_div(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+    out = torch.empty_like(a, memory_format=torch.contiguous_format)
+    run_div(a, b, out)
     return out
 
 
@@ -106,6 +113,11 @@ def _compile_graph(
         torch.ops.prims.mul: ("mul", _run_mul),
         torch.ops.prims.mul.default: ("mul", _run_mul),
         torch.ops.aten.mul.Tensor: ("mul", _run_mul),
+        operator.truediv: ("div", _run_div),
+        torch.div: ("div", _run_div),
+        torch.ops.prims.div: ("div", _run_div),
+        torch.ops.prims.div.default: ("div", _run_div),
+        torch.ops.aten.div.Tensor: ("div", _run_div),
         operator.matmul: ("matmul", _run_matmul),
         torch.matmul: ("matmul", _run_matmul),
         torch.ops.aten.mm.default: ("matmul", _run_matmul),
@@ -214,7 +226,13 @@ def ref_backend_backend(
     ):
         return _compile_graph(gm, example_inputs)
 
-    decompositions = get_decompositions([torch.ops.aten.add.Tensor, torch.ops.aten.sub.Tensor])
+    decompositions = get_decompositions(
+        [
+            torch.ops.aten.add.Tensor,
+            torch.ops.aten.sub.Tensor,
+            torch.ops.aten.div.Tensor,
+        ]
+    )
 
     def fw_compiler(
         fx_gm: torch.fx.GraphModule, fx_example_inputs: List[torch.Tensor]

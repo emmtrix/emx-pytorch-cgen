@@ -25,6 +25,10 @@ def j(a, b):
     return a * b
 
 
+def k(a, b):
+    return a / b
+
+
 def test_torch_compile_add_matches_eager():
     compiled = torch.compile(f, backend=ref_backend_backend)
     a = torch.randn(2, 3, dtype=torch.float32)
@@ -95,6 +99,30 @@ def test_torch_compile_mul_handles_non_contiguous():
     b = torch.randn(4, 4, dtype=torch.float32).t()
     result = compiled(a, b)
     torch.testing.assert_close(result, j(a, b))
+
+
+def test_torch_compile_div_matches_eager():
+    compiled = torch.compile(k, backend=ref_backend_backend)
+    a = torch.randn(2, 3, dtype=torch.float32)
+    b = torch.randn(2, 3, dtype=torch.float32)
+    result = compiled(a, b)
+    torch.testing.assert_close(result, k(a, b))
+
+
+def test_torch_compile_div_broadcast_matches_eager():
+    compiled = torch.compile(k, backend=ref_backend_backend)
+    a = torch.randn(2, 3, dtype=torch.float32)
+    b = torch.randn(3, dtype=torch.float32)
+    result = compiled(a, b)
+    torch.testing.assert_close(result, k(a, b))
+
+
+def test_torch_compile_div_handles_non_contiguous():
+    compiled = torch.compile(k, backend=ref_backend_backend)
+    a = torch.randn(4, 4, dtype=torch.float32).t()
+    b = torch.randn(4, 4, dtype=torch.float32).t()
+    result = compiled(a, b)
+    torch.testing.assert_close(result, k(a, b))
 
 
 def test_torch_compile_matmul_matches_eager():
