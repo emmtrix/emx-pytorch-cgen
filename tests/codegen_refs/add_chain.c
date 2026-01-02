@@ -1,21 +1,23 @@
 #include <stdint.h>
-#include <stdlib.h>
 
-void node1_add_f32(const float* a, const float* b, float* out, int64_t numel) {
-    for (int64_t i = 0; i < numel; ++i) {
-        out[i] = a[i] + b[i];
+void node1_add_f32(const float a[2][3], const float b[2][3], float out[2][3]) {
+    for (int64_t i0 = 0; i0 < 2; ++i0) {
+        for (int64_t i1 = 0; i1 < 3; ++i1) {
+            out[i0][i1] = a[i0][i1] + b[i0][i1];
+        }
     }
 }
 
-void node2_add_f32(const float* a, const float* b, float* out, int64_t numel) {
-    for (int64_t i = 0; i < numel; ++i) {
-        out[i] = a[i] + b[i];
+void node2_add_f32(const float a[2][3], const float b[2][3], float out[2][3]) {
+    for (int64_t i0 = 0; i0 < 2; ++i0) {
+        for (int64_t i1 = 0; i1 < 3; ++i1) {
+            out[i0][i1] = a[i0][i1] + b[i0][i1];
+        }
     }
 }
 
-void ref_codegen_main_f32(const float* input_0, const float* input_1, const float* input_2, float* out, int64_t numel) {
-    float* tmp_0 = (float*)malloc(numel * sizeof(float));
-    node1_add_f32(input_0, input_1, tmp_0, numel);
-    node2_add_f32(tmp_0, input_2, out, numel);
-    free(tmp_0);
+void ref_codegen_main_f32(const float input_0[2][3], const float input_1[2][3], const float input_2[2][3], float out[2][3]) {
+    float tmp_0[2][3];
+    node1_add_f32(input_0, input_1, tmp_0);
+    node2_add_f32(tmp_0, input_2, out);
 }

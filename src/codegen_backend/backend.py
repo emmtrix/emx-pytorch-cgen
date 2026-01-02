@@ -4,7 +4,7 @@ import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Dict, List, Sequence
+from typing import Callable, Dict, List, Sequence, Tuple
 
 import torch
 import torch.fx
@@ -52,11 +52,12 @@ class _BinaryLibrary:
     lib: object
     input_count: int
     op_name: str
+    shape: Tuple[int, ...]
 
     def run(self, inputs: Sequence[torch.Tensor], out: torch.Tensor) -> None:
         fn = getattr(self.lib, f"ref_codegen_main_f32")
         args = [tensor.data_ptr() for tensor in inputs]
-        args.extend([out.data_ptr(), out.numel()])
+        args.append(out.data_ptr())
         fn(*args)
 
 
@@ -72,30 +73,52 @@ class _BinaryGraph:
     tensor_placeholders: List[torch.fx.Node]
 
 
-def _write_binary_source(op_spec: _BinaryOpSpec, op_graph: _BinaryGraph) -> str:
+def _format_array_suffix(shape: Sequence[int]) -> str:
+    return "".join(f"[{dim}]" for dim in shape) or "[1]"
+
+
+def _write_binary_source(
+    op_spec: _BinaryOpSpec, op_graph: _BinaryGraph, shape: Sequence[int]
+) -> str:
     inputs = op_graph.tensor_placeholders
     op_nodes = op_graph.op_nodes
+    array_suffix = _format_array_suffix(shape)
     input_args = ", ".join(
-        [f"const float* input_{idx}" for idx in range(len(inputs))]
+        [f"const float input_{idx}{array_suffix}" for idx in range(len(inputs))]
     )
     input_args = f"{input_args}, " if input_args else ""
     lines = [
         "#include <stdint.h>",
-        "#include <stdlib.h>",
         "",
     ]
     for idx, _ in enumerate(op_nodes, start=1):
+        index_expr = "".join(f"[i{dim}]" for dim in range(len(shape))) or "[0]"
         lines.extend(
             [
-                f"void node{idx}_{op_spec.name}_f32(const float* a, const float* b, float* out, int64_t numel) {{",
-                "    for (int64_t i = 0; i < numel; ++i) {",
-                f"        out[i] = a[i] {op_spec.symbol} b[i];",
-                "    }",
+                f"void node{idx}_{op_spec.name}_f32(const float a{array_suffix}, const float b{array_suffix}, float out{array_suffix}) {{",
+            ]
+        )
+        indent = "    "
+        if shape:
+            for dim, size in enumerate(shape):
+                lines.append(
+                    f"{indent}for (int64_t i{dim} = 0; i{dim} < {size}; ++i{dim}) {{"
+                )
+                indent += "    "
+        lines.append(
+            f"{indent}out{index_expr} = a{index_expr} {op_spec.symbol} b{index_expr};"
+        )
+        if shape:
+            for _ in range(len(shape)):
+                indent = indent[:-4]
+                lines.append(f"{indent}}}")
+        lines.extend(
+            [
                 "}",
                 "",
             ]
         )
-    lines.append(f"void ref_codegen_main_f32({input_args}float* out, int64_t numel) {{")
+    lines.append(f"void ref_codegen_main_f32({input_args}float out{array_suffix}) {{")
     name_map: Dict[torch.fx.Node, str] = {}
     for idx, placeholder in enumerate(inputs):
         name_map[placeholder] = f"input_{idx}"
@@ -105,7 +128,7 @@ def _write_binary_source(op_spec: _BinaryOpSpec, op_graph: _BinaryGraph) -> str:
             out_name = "out"
         else:
             out_name = f"tmp_{idx}"
-            lines.append(f"    float* {out_name} = (float*)malloc(numel * sizeof(float));")
+            lines.append(f"    float {out_name}{array_suffix};")
         name_map[op_node] = out_name
     for idx, op_node in enumerate(op_nodes, start=1):
         lhs, rhs = op_node.args
@@ -113,30 +136,46 @@ def _write_binary_source(op_spec: _BinaryOpSpec, op_graph: _BinaryGraph) -> str:
         rhs_name = name_map[rhs]
         out_name = name_map[op_node]
         lines.append(
-            f"    node{idx}_{op_spec.name}_f32({lhs_name}, {rhs_name}, {out_name}, numel);"
+            f"    node{idx}_{op_spec.name}_f32({lhs_name}, {rhs_name}, {out_name});"
         )
-    for idx, op_node in reversed(list(enumerate(op_nodes))):
-        if op_node is output_op:
-            continue
-        lines.append(f"    free(tmp_{idx});")
     lines.append("}")
     return "\n".join(lines) + "\n"
 
 
-def get_add_source(gm: torch.fx.GraphModule) -> str:
+def _extract_shape(example_inputs: Sequence[torch.Tensor]) -> Tuple[int, ...]:
+    if not example_inputs:
+        raise RefBackendError(
+            "codegen backend requires at least one example tensor input"
+        )
+    shape = tuple(example_inputs[0].shape)
+    for tensor in example_inputs[1:]:
+        if tuple(tensor.shape) != shape:
+            raise RefBackendError(
+                "codegen backend requires example inputs to share shapes"
+            )
+    return shape
+
+
+def get_add_source(
+    gm: torch.fx.GraphModule, example_inputs: Sequence[torch.Tensor]
+) -> str:
     op_graph = _analyze_graph(SUPPORTED_BINARY_OPS["add"], gm)
-    return _write_binary_source(SUPPORTED_BINARY_OPS["add"], op_graph)
+    shape = _extract_shape(example_inputs)
+    return _write_binary_source(SUPPORTED_BINARY_OPS["add"], op_graph, shape)
 
 
-def get_sub_source(gm: torch.fx.GraphModule) -> str:
+def get_sub_source(
+    gm: torch.fx.GraphModule, example_inputs: Sequence[torch.Tensor]
+) -> str:
     op_graph = _analyze_graph(SUPPORTED_BINARY_OPS["sub"], gm)
-    return _write_binary_source(SUPPORTED_BINARY_OPS["sub"], op_graph)
+    shape = _extract_shape(example_inputs)
+    return _write_binary_source(SUPPORTED_BINARY_OPS["sub"], op_graph, shape)
 
 
 def _compile_binary_library(
-    op_spec: _BinaryOpSpec, op_graph: _BinaryGraph
+    op_spec: _BinaryOpSpec, op_graph: _BinaryGraph, shape: Sequence[int]
 ) -> _BinaryLibrary:
-    source = _write_binary_source(op_spec, op_graph)
+    source = _write_binary_source(op_spec, op_graph, shape)
     digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
     cached = _LIBRARY_CACHE.get(digest)
     if cached is not None:
@@ -162,7 +201,7 @@ def _compile_binary_library(
 
     lib = ctypes.CDLL(str(so_path))
     argtypes = [ctypes.c_void_p for _ in op_graph.tensor_placeholders]
-    argtypes.extend([ctypes.c_void_p, ctypes.c_int64])
+    argtypes.append(ctypes.c_void_p)
     lib.ref_codegen_main_f32.argtypes = argtypes
     lib.ref_codegen_main_f32.restype = None
 
@@ -171,6 +210,7 @@ def _compile_binary_library(
         lib=lib,
         input_count=len(op_graph.tensor_placeholders),
         op_name=op_spec.name,
+        shape=tuple(shape),
     )
     _LIBRARY_CACHE[digest] = compiled
     return compiled
@@ -287,6 +327,21 @@ def _compile_graph(
         for placeholder, example in zip(placeholders, example_inputs)
         if isinstance(example, torch.Tensor)
     ]
+    tensor_example_inputs = [
+        example
+        for placeholder, example in zip(placeholders, example_inputs)
+        if isinstance(example, torch.Tensor)
+    ]
+    if not tensor_example_inputs:
+        raise RefBackendError(
+            f"codegen {op_spec.name} backend expects tensor inputs only"
+        )
+    shape = tuple(tensor_example_inputs[0].shape)
+    for tensor in tensor_example_inputs[1:]:
+        if tuple(tensor.shape) != shape:
+            raise RefBackendError(
+                f"codegen {op_spec.name} requires inputs to have identical shapes"
+            )
     op_graph = _BinaryGraph(
         placeholders=op_graph.placeholders,
         op_nodes=op_graph.op_nodes,
@@ -297,7 +352,7 @@ def _compile_graph(
     output_node = op_graph.output_node
     output_value = op_graph.output_value
     output_structure = output_node.args[0]
-    lib = _compile_binary_library(op_spec, op_graph)
+    lib = _compile_binary_library(op_spec, op_graph, shape)
 
     def resolve_output(value: object, env: Dict[str, object]) -> object:
         if isinstance(value, torch.fx.Node):
@@ -324,6 +379,10 @@ def _compile_graph(
                 )
             input_tensors.append(value)
         _validate_binary_inputs(op_spec, input_tensors)
+        if input_tensors[0].shape != lib.shape:
+            raise RefBackendError(
+                f"codegen {op_spec.name} requires inputs to have shape {lib.shape}"
+            )
         contiguous_inputs = [tensor.contiguous() for tensor in input_tensors]
         out = torch.empty_like(
             contiguous_inputs[0], memory_format=torch.contiguous_format

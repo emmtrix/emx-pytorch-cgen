@@ -11,10 +11,12 @@ from codegen_backend.backend import get_add_source, get_sub_source
 REFERENCE_DIR = Path(__file__).resolve().parent / "codegen_refs"
 
 
-def _assert_codegen_source_matches(reference_name: str, source_fn, fn) -> None:
+def _assert_codegen_source_matches(
+    reference_name: str, source_fn, fn, example_inputs
+) -> None:
     reference_path = REFERENCE_DIR / reference_name
     gm = torch.fx.symbolic_trace(fn)
-    source = source_fn(gm).lstrip()
+    source = source_fn(gm, example_inputs).lstrip()
     if os.getenv("UPDATE_CODEGEN_REFS"):
         reference_path.parent.mkdir(parents=True, exist_ok=True)
         reference_path.write_text(source, encoding="utf-8")
@@ -50,10 +52,10 @@ def sub_chain_fn(a, b, c):
     ],
 )
 def test_codegen_binary_matches_eager(reference_name, fn, source_fn, backend):
-    _assert_codegen_source_matches(reference_name, source_fn, fn)
-    compiled = torch.compile(fn, backend=backend)
     a = torch.randn(2, 3, dtype=torch.float32)
     b = torch.randn(2, 3, dtype=torch.float32)
+    _assert_codegen_source_matches(reference_name, source_fn, fn, (a, b))
+    compiled = torch.compile(fn, backend=backend)
     result = compiled(a, b)
     torch.testing.assert_close(result, fn(a, b))
 
@@ -68,10 +70,10 @@ def test_codegen_binary_matches_eager(reference_name, fn, source_fn, backend):
 def test_codegen_binary_handles_non_contiguous(
     reference_name, fn, source_fn, backend
 ):
-    _assert_codegen_source_matches(reference_name, source_fn, fn)
-    compiled = torch.compile(fn, backend=backend)
     a = torch.randn(4, 4, dtype=torch.float32).t()
     b = torch.randn(4, 4, dtype=torch.float32).t()
+    _assert_codegen_source_matches(reference_name, source_fn, fn, (a, b))
+    compiled = torch.compile(fn, backend=backend)
     result = compiled(a, b)
     torch.testing.assert_close(result, fn(a, b))
 
@@ -84,10 +86,10 @@ def test_codegen_binary_handles_non_contiguous(
     ],
 )
 def test_codegen_binary_rejects_other_ops(reference_name, fn, source_fn, backend):
-    _assert_codegen_source_matches(reference_name, source_fn, fn)
-    compiled = torch.compile(mul_fn, backend=backend)
     a = torch.randn(2, 3, dtype=torch.float32)
     b = torch.randn(2, 3, dtype=torch.float32)
+    _assert_codegen_source_matches(reference_name, source_fn, fn, (a, b))
+    compiled = torch.compile(mul_fn, backend=backend)
     with pytest.raises(BackendCompilerFailed, match="Unsupported call_function"):
         compiled(a, b)
 
@@ -102,10 +104,10 @@ def test_codegen_binary_rejects_other_ops(reference_name, fn, source_fn, backend
 def test_codegen_binary_handles_multiple_ops(
     reference_name, fn, source_fn, backend
 ):
-    _assert_codegen_source_matches(reference_name, source_fn, fn)
-    compiled = torch.compile(fn, backend=backend)
     a = torch.randn(2, 3, dtype=torch.float32)
     b = torch.randn(2, 3, dtype=torch.float32)
     c = torch.randn(2, 3, dtype=torch.float32)
+    _assert_codegen_source_matches(reference_name, source_fn, fn, (a, b, c))
+    compiled = torch.compile(fn, backend=backend)
     result = compiled(a, b, c)
     torch.testing.assert_close(result, fn(a, b, c))
