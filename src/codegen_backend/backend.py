@@ -165,7 +165,7 @@ def _write_elementwise_kernel(
             )
             indent += "    "
     index_expr = "".join(f"[i{dim}]" for dim in range(len(shape))) or "[0]"
-    scalar_fn = f"ref_scalar_{op_spec.name}"
+    scalar_fn = f"ref_scalar_f32_{op_spec.name}"
     if op_spec.kind == "binary":
         lines.append(
             f"{indent}out{index_expr} = {scalar_fn}(a{index_expr}, b{index_expr});"
@@ -234,7 +234,7 @@ def _write_generic_source(graph: _GenericGraph) -> str:
     op_nodes = graph.op_nodes
     lines = [
         "#include <stdint.h>",
-        "#include \"ops_scalar.h\"",
+        "#include \"ops_scalar_f32.h\"",
         "",
     ]
     for index, op_node in enumerate(op_nodes, start=1):

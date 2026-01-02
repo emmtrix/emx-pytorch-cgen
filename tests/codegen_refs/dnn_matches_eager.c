@@ -1,5 +1,5 @@
 #include <stdint.h>
-#include "ops_scalar.h"
+#include "ops_scalar_f32.h"
 
 void node1_matmul_f32(const float a[2][3], const float b[3][4], float out[2][4]) {
     for (int64_t i = 0; i < 2; ++i) {
@@ -16,7 +16,7 @@ void node1_matmul_f32(const float a[2][3], const float b[3][4], float out[2][4])
 void node2_add_f32(const float a[2][4], const float b[2][4], float out[2][4]) {
     for (int64_t i0 = 0; i0 < 2; ++i0) {
         for (int64_t i1 = 0; i1 < 4; ++i1) {
-            out[i0][i1] = ref_scalar_add(a[i0][i1], b[i0][i1]);
+            out[i0][i1] = ref_scalar_f32_add(a[i0][i1], b[i0][i1]);
         }
     }
 }
@@ -24,7 +24,7 @@ void node2_add_f32(const float a[2][4], const float b[2][4], float out[2][4]) {
 void node3_relu_f32(const float a[2][4], float out[2][4]) {
     for (int64_t i0 = 0; i0 < 2; ++i0) {
         for (int64_t i1 = 0; i1 < 4; ++i1) {
-            out[i0][i1] = ref_scalar_relu(a[i0][i1]);
+            out[i0][i1] = ref_scalar_f32_relu(a[i0][i1]);
         }
     }
 }
