@@ -33,7 +33,11 @@ int ref_run_matmul(const RefOpCall *call, char *err_msg, size_t err_cap);
 int ref_run_bmm(const RefOpCall *call, char *err_msg, size_t err_cap);
 int ref_run_broadcast_in_dim(const RefOpCall *call, char *err_msg, size_t err_cap);
 
-int ref_run_op(int32_t op_kind, const RefOpCall *call, char *err_msg, size_t err_cap) {
+REF_BACKEND_API int ref_run_op(
+    int32_t op_kind,
+    const RefOpCall *call,
+    char *err_msg,
+    size_t err_cap) {
     if (call == NULL) {
         write_error(err_msg, err_cap, "RefOpCall is NULL");
         return 1;
