@@ -1,7 +1,7 @@
 #ifndef REF_BACKEND_OPS_UNARY_H
 #define REF_BACKEND_OPS_UNARY_H
 
-#include "ref_backend.h"
+#include "c_ref_backend.h"
 
 typedef float (*RefUnaryF32Op)(float);
 

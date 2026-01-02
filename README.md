@@ -10,10 +10,10 @@ pip install -e .
 
 ## Build the native library
 
-The extension module (`ref_backend._ref_backend`) provides the C ABI and is built via setuptools.
+The extension module (`c_ref_backend._c_ref_backend`) provides the C ABI and is built via setuptools.
 
 ```bash
-python -m ref_backend.build
+python -m c_ref_backend.build
 ```
 
 ## Run tests
@@ -26,13 +26,13 @@ pytest -q
 
 ```python
 import torch
-from ref_backend.backend import ref_backend_backend
+from c_ref_backend.backend import c_ref_backend_backend
 
 
 def f(a, b):
     return a + b
 
-compiled = torch.compile(f, backend=ref_backend_backend)
+compiled = torch.compile(f, backend=c_ref_backend_backend)
 
 a = torch.randn(4, 4)
 b = torch.randn(4, 4)

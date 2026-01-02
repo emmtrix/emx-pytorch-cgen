@@ -4,7 +4,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_methods_invocations import SampleInput, op_db
 from torch.testing._internal.common_utils import TestCase, run_tests
 
-from ref_backend.backend import ref_backend_backend
+from c_ref_backend.backend import c_ref_backend_backend
 def _extract_tensors(sample):
     tensors = [sample.input]
     tensors.extend(arg for arg in sample.args if isinstance(arg, torch.Tensor))
@@ -157,7 +157,7 @@ def _compile_op(op):
     def compiled_fn(*args: torch.Tensor) -> torch.Tensor:
         return op(*args)
 
-    return torch.compile(compiled_fn, backend=ref_backend_backend)
+    return torch.compile(compiled_fn, backend=c_ref_backend_backend)
 
 
 def _constraints_for(op):
