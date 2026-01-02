@@ -103,6 +103,66 @@ OP_TEST_CONFIG = {
     "cos": {
         "allowed_dtypes": (torch.float32,),
     },
+    "acos": {
+        "allowed_dtypes": (torch.float32,),
+    },
+    "acosh": {
+        "allowed_dtypes": (torch.float32,),
+    },
+    "asin": {
+        "allowed_dtypes": (torch.float32,),
+    },
+    "asinh": {
+        "allowed_dtypes": (torch.float32,),
+    },
+    "atan": {
+        "allowed_dtypes": (torch.float32,),
+    },
+    "atanh": {
+        "allowed_dtypes": (torch.float32,),
+    },
+    "cosh": {
+        "allowed_dtypes": (torch.float32,),
+    },
+    "sinh": {
+        "allowed_dtypes": (torch.float32,),
+    },
+    "tan": {
+        "allowed_dtypes": (torch.float32,),
+    },
+    "erf": {
+        "allowed_dtypes": (torch.float32,),
+    },
+    "erfc": {
+        "allowed_dtypes": (torch.float32,),
+    },
+    "expm1": {
+        "allowed_dtypes": (torch.float32,),
+    },
+    "log1p": {
+        "allowed_dtypes": (torch.float32,),
+    },
+    "log2": {
+        "allowed_dtypes": (torch.float32,),
+    },
+    "log10": {
+        "allowed_dtypes": (torch.float32,),
+    },
+    "rsqrt": {
+        "allowed_dtypes": (torch.float32,),
+    },
+    "sigmoid": {
+        "allowed_dtypes": (torch.float32,),
+    },
+    "sign": {
+        "allowed_dtypes": (torch.float32,),
+    },
+    "round": {
+        "allowed_dtypes": (torch.float32,),
+    },
+    "trunc": {
+        "allowed_dtypes": (torch.float32,),
+    },
     "tanh": {
         "allowed_dtypes": (torch.float32,),
     },

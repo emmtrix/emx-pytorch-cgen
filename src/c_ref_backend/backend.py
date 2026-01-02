@@ -11,25 +11,45 @@ from .cffi_bindings import (
     RefBackendError,
     run_add,
     run_abs,
+    run_acos,
+    run_acosh,
+    run_asin,
+    run_asinh,
+    run_atan,
+    run_atanh,
     run_bmm,
     run_broadcast_in_dim,
     run_ceil,
     run_cos,
+    run_cosh,
     run_div,
+    run_erf,
+    run_erfc,
     run_exp,
+    run_expm1,
     run_floor,
     run_log,
+    run_log1p,
+    run_log10,
+    run_log2,
     run_matmul,
     run_maximum,
     run_minimum,
     run_mul,
     run_neg,
+    run_round,
     run_reciprocal,
     run_relu,
+    run_rsqrt,
+    run_sigmoid,
     run_sin,
+    run_sign,
+    run_sinh,
     run_sqrt,
     run_sub,
+    run_tan,
     run_tanh,
+    run_trunc,
 )
 
 
@@ -108,6 +128,126 @@ def _run_sin(a: torch.Tensor) -> torch.Tensor:
 def _run_cos(a: torch.Tensor) -> torch.Tensor:
     out = torch.empty_like(a, memory_format=torch.contiguous_format)
     run_cos(a, out)
+    return out
+
+
+def _run_acos(a: torch.Tensor) -> torch.Tensor:
+    out = torch.empty_like(a, memory_format=torch.contiguous_format)
+    run_acos(a, out)
+    return out
+
+
+def _run_acosh(a: torch.Tensor) -> torch.Tensor:
+    out = torch.empty_like(a, memory_format=torch.contiguous_format)
+    run_acosh(a, out)
+    return out
+
+
+def _run_asin(a: torch.Tensor) -> torch.Tensor:
+    out = torch.empty_like(a, memory_format=torch.contiguous_format)
+    run_asin(a, out)
+    return out
+
+
+def _run_asinh(a: torch.Tensor) -> torch.Tensor:
+    out = torch.empty_like(a, memory_format=torch.contiguous_format)
+    run_asinh(a, out)
+    return out
+
+
+def _run_atan(a: torch.Tensor) -> torch.Tensor:
+    out = torch.empty_like(a, memory_format=torch.contiguous_format)
+    run_atan(a, out)
+    return out
+
+
+def _run_atanh(a: torch.Tensor) -> torch.Tensor:
+    out = torch.empty_like(a, memory_format=torch.contiguous_format)
+    run_atanh(a, out)
+    return out
+
+
+def _run_cosh(a: torch.Tensor) -> torch.Tensor:
+    out = torch.empty_like(a, memory_format=torch.contiguous_format)
+    run_cosh(a, out)
+    return out
+
+
+def _run_sinh(a: torch.Tensor) -> torch.Tensor:
+    out = torch.empty_like(a, memory_format=torch.contiguous_format)
+    run_sinh(a, out)
+    return out
+
+
+def _run_tan(a: torch.Tensor) -> torch.Tensor:
+    out = torch.empty_like(a, memory_format=torch.contiguous_format)
+    run_tan(a, out)
+    return out
+
+
+def _run_erf(a: torch.Tensor) -> torch.Tensor:
+    out = torch.empty_like(a, memory_format=torch.contiguous_format)
+    run_erf(a, out)
+    return out
+
+
+def _run_erfc(a: torch.Tensor) -> torch.Tensor:
+    out = torch.empty_like(a, memory_format=torch.contiguous_format)
+    run_erfc(a, out)
+    return out
+
+
+def _run_expm1(a: torch.Tensor) -> torch.Tensor:
+    out = torch.empty_like(a, memory_format=torch.contiguous_format)
+    run_expm1(a, out)
+    return out
+
+
+def _run_log1p(a: torch.Tensor) -> torch.Tensor:
+    out = torch.empty_like(a, memory_format=torch.contiguous_format)
+    run_log1p(a, out)
+    return out
+
+
+def _run_log2(a: torch.Tensor) -> torch.Tensor:
+    out = torch.empty_like(a, memory_format=torch.contiguous_format)
+    run_log2(a, out)
+    return out
+
+
+def _run_log10(a: torch.Tensor) -> torch.Tensor:
+    out = torch.empty_like(a, memory_format=torch.contiguous_format)
+    run_log10(a, out)
+    return out
+
+
+def _run_rsqrt(a: torch.Tensor) -> torch.Tensor:
+    out = torch.empty_like(a, memory_format=torch.contiguous_format)
+    run_rsqrt(a, out)
+    return out
+
+
+def _run_sigmoid(a: torch.Tensor) -> torch.Tensor:
+    out = torch.empty_like(a, memory_format=torch.contiguous_format)
+    run_sigmoid(a, out)
+    return out
+
+
+def _run_sign(a: torch.Tensor) -> torch.Tensor:
+    out = torch.empty_like(a, memory_format=torch.contiguous_format)
+    run_sign(a, out)
+    return out
+
+
+def _run_round(a: torch.Tensor) -> torch.Tensor:
+    out = torch.empty_like(a, memory_format=torch.contiguous_format)
+    run_round(a, out)
+    return out
+
+
+def _run_trunc(a: torch.Tensor) -> torch.Tensor:
+    out = torch.empty_like(a, memory_format=torch.contiguous_format)
+    run_trunc(a, out)
     return out
 
 
@@ -242,6 +382,66 @@ def _compile_graph(
         torch.cos: ("cos", _run_cos),
         torch.ops.aten.cos.default: ("cos", _run_cos),
         torch.ops.aten.cos: ("cos", _run_cos),
+        torch.acos: ("acos", _run_acos),
+        torch.ops.aten.acos.default: ("acos", _run_acos),
+        torch.ops.aten.acos: ("acos", _run_acos),
+        torch.acosh: ("acosh", _run_acosh),
+        torch.ops.aten.acosh.default: ("acosh", _run_acosh),
+        torch.ops.aten.acosh: ("acosh", _run_acosh),
+        torch.asin: ("asin", _run_asin),
+        torch.ops.aten.asin.default: ("asin", _run_asin),
+        torch.ops.aten.asin: ("asin", _run_asin),
+        torch.asinh: ("asinh", _run_asinh),
+        torch.ops.aten.asinh.default: ("asinh", _run_asinh),
+        torch.ops.aten.asinh: ("asinh", _run_asinh),
+        torch.atan: ("atan", _run_atan),
+        torch.ops.aten.atan.default: ("atan", _run_atan),
+        torch.ops.aten.atan: ("atan", _run_atan),
+        torch.atanh: ("atanh", _run_atanh),
+        torch.ops.aten.atanh.default: ("atanh", _run_atanh),
+        torch.ops.aten.atanh: ("atanh", _run_atanh),
+        torch.cosh: ("cosh", _run_cosh),
+        torch.ops.aten.cosh.default: ("cosh", _run_cosh),
+        torch.ops.aten.cosh: ("cosh", _run_cosh),
+        torch.sinh: ("sinh", _run_sinh),
+        torch.ops.aten.sinh.default: ("sinh", _run_sinh),
+        torch.ops.aten.sinh: ("sinh", _run_sinh),
+        torch.tan: ("tan", _run_tan),
+        torch.ops.aten.tan.default: ("tan", _run_tan),
+        torch.ops.aten.tan: ("tan", _run_tan),
+        torch.erf: ("erf", _run_erf),
+        torch.ops.aten.erf.default: ("erf", _run_erf),
+        torch.ops.aten.erf: ("erf", _run_erf),
+        torch.erfc: ("erfc", _run_erfc),
+        torch.ops.aten.erfc.default: ("erfc", _run_erfc),
+        torch.ops.aten.erfc: ("erfc", _run_erfc),
+        torch.expm1: ("expm1", _run_expm1),
+        torch.ops.aten.expm1.default: ("expm1", _run_expm1),
+        torch.ops.aten.expm1: ("expm1", _run_expm1),
+        torch.log1p: ("log1p", _run_log1p),
+        torch.ops.aten.log1p.default: ("log1p", _run_log1p),
+        torch.ops.aten.log1p: ("log1p", _run_log1p),
+        torch.log2: ("log2", _run_log2),
+        torch.ops.aten.log2.default: ("log2", _run_log2),
+        torch.ops.aten.log2: ("log2", _run_log2),
+        torch.log10: ("log10", _run_log10),
+        torch.ops.aten.log10.default: ("log10", _run_log10),
+        torch.ops.aten.log10: ("log10", _run_log10),
+        torch.rsqrt: ("rsqrt", _run_rsqrt),
+        torch.ops.aten.rsqrt.default: ("rsqrt", _run_rsqrt),
+        torch.ops.aten.rsqrt: ("rsqrt", _run_rsqrt),
+        torch.sigmoid: ("sigmoid", _run_sigmoid),
+        torch.ops.aten.sigmoid.default: ("sigmoid", _run_sigmoid),
+        torch.ops.aten.sigmoid: ("sigmoid", _run_sigmoid),
+        torch.sign: ("sign", _run_sign),
+        torch.ops.aten.sign.default: ("sign", _run_sign),
+        torch.ops.aten.sign: ("sign", _run_sign),
+        torch.round: ("round", _run_round),
+        torch.ops.aten.round.default: ("round", _run_round),
+        torch.ops.aten.round: ("round", _run_round),
+        torch.trunc: ("trunc", _run_trunc),
+        torch.ops.aten.trunc.default: ("trunc", _run_trunc),
+        torch.ops.aten.trunc: ("trunc", _run_trunc),
         torch.tanh: ("tanh", _run_tanh),
         torch.ops.aten.tanh.default: ("tanh", _run_tanh),
         torch.ops.aten.tanh: ("tanh", _run_tanh),
@@ -279,6 +479,26 @@ def _compile_graph(
         "log",
         "sin",
         "cos",
+        "acos",
+        "acosh",
+        "asin",
+        "asinh",
+        "atan",
+        "atanh",
+        "cosh",
+        "sinh",
+        "tan",
+        "erf",
+        "erfc",
+        "expm1",
+        "log1p",
+        "log2",
+        "log10",
+        "rsqrt",
+        "sigmoid",
+        "sign",
+        "round",
+        "trunc",
         "tanh",
         "floor",
         "ceil",
