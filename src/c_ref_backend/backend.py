@@ -370,7 +370,7 @@ def _compile_graph(
     return compiled
 
 
-def ref_backend_backend(
+def c_ref_backend_backend(
     gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]
 ) -> Callable[..., torch.Tensor]:
     if any(

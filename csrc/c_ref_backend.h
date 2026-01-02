@@ -1,5 +1,5 @@
-#ifndef REF_BACKEND_H
-#define REF_BACKEND_H
+#ifndef C_REF_BACKEND_H
+#define C_REF_BACKEND_H
 
 #include <stddef.h>
 #include <stdint.h>

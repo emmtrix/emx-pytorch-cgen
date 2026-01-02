@@ -3,9 +3,9 @@ from setuptools import Extension, setup
 setup(
     ext_modules=[
         Extension(
-            "ref_backend._ref_backend",
+            "c_ref_backend._c_ref_backend",
             sources=[
-                "csrc/ref_backend.c",
+                "csrc/c_ref_backend.c",
                 "csrc/ops_binary.c",
                 "csrc/ops_add.c",
                 "csrc/ops_sub.c",
@@ -30,7 +30,7 @@ setup(
                 "csrc/ops_broadcast_in_dim.c",
                 "csrc/ops_unary.c",
                 "csrc/ops_utils.c",
-                "csrc/ref_backend_module.c",
+                "csrc/c_ref_backend_module.c",
             ],
             include_dirs=["csrc"],
         )

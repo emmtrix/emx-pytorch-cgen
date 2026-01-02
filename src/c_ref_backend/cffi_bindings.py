@@ -73,7 +73,7 @@ class TensorViewBuffers:
 
 class RefBackendLibrary:
     def __init__(self) -> None:
-        module = importlib.import_module("ref_backend._ref_backend")
+        module = importlib.import_module("c_ref_backend._c_ref_backend")
         self.lib = ctypes.CDLL(module.__file__)
         self.lib.ref_run_op.argtypes = [
             ctypes.c_int32,
