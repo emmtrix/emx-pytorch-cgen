@@ -36,6 +36,26 @@ class RefOpKind:
     REF_OP_CEIL = 18
     REF_OP_RECIPROCAL = 19
     REF_OP_RELU = 20
+    REF_OP_ACOS = 21
+    REF_OP_ACOSH = 22
+    REF_OP_ASIN = 23
+    REF_OP_ASINH = 24
+    REF_OP_ATAN = 25
+    REF_OP_ATANH = 26
+    REF_OP_COSH = 27
+    REF_OP_SINH = 28
+    REF_OP_TAN = 29
+    REF_OP_ERF = 30
+    REF_OP_ERFC = 31
+    REF_OP_EXPM1 = 32
+    REF_OP_LOG1P = 33
+    REF_OP_LOG2 = 34
+    REF_OP_LOG10 = 35
+    REF_OP_RSQRT = 36
+    REF_OP_SIGMOID = 37
+    REF_OP_SIGN = 38
+    REF_OP_ROUND = 39
+    REF_OP_TRUNC = 40
 
 
 class RefTensorView(ctypes.Structure):
@@ -238,6 +258,86 @@ def run_sin(a: torch.Tensor, out: torch.Tensor) -> None:
 
 def run_cos(a: torch.Tensor, out: torch.Tensor) -> None:
     _run_unary_elementwise("cos", RefOpKind.REF_OP_COS, a, out)
+
+
+def run_acos(a: torch.Tensor, out: torch.Tensor) -> None:
+    _run_unary_elementwise("acos", RefOpKind.REF_OP_ACOS, a, out)
+
+
+def run_acosh(a: torch.Tensor, out: torch.Tensor) -> None:
+    _run_unary_elementwise("acosh", RefOpKind.REF_OP_ACOSH, a, out)
+
+
+def run_asin(a: torch.Tensor, out: torch.Tensor) -> None:
+    _run_unary_elementwise("asin", RefOpKind.REF_OP_ASIN, a, out)
+
+
+def run_asinh(a: torch.Tensor, out: torch.Tensor) -> None:
+    _run_unary_elementwise("asinh", RefOpKind.REF_OP_ASINH, a, out)
+
+
+def run_atan(a: torch.Tensor, out: torch.Tensor) -> None:
+    _run_unary_elementwise("atan", RefOpKind.REF_OP_ATAN, a, out)
+
+
+def run_atanh(a: torch.Tensor, out: torch.Tensor) -> None:
+    _run_unary_elementwise("atanh", RefOpKind.REF_OP_ATANH, a, out)
+
+
+def run_cosh(a: torch.Tensor, out: torch.Tensor) -> None:
+    _run_unary_elementwise("cosh", RefOpKind.REF_OP_COSH, a, out)
+
+
+def run_sinh(a: torch.Tensor, out: torch.Tensor) -> None:
+    _run_unary_elementwise("sinh", RefOpKind.REF_OP_SINH, a, out)
+
+
+def run_tan(a: torch.Tensor, out: torch.Tensor) -> None:
+    _run_unary_elementwise("tan", RefOpKind.REF_OP_TAN, a, out)
+
+
+def run_erf(a: torch.Tensor, out: torch.Tensor) -> None:
+    _run_unary_elementwise("erf", RefOpKind.REF_OP_ERF, a, out)
+
+
+def run_erfc(a: torch.Tensor, out: torch.Tensor) -> None:
+    _run_unary_elementwise("erfc", RefOpKind.REF_OP_ERFC, a, out)
+
+
+def run_expm1(a: torch.Tensor, out: torch.Tensor) -> None:
+    _run_unary_elementwise("expm1", RefOpKind.REF_OP_EXPM1, a, out)
+
+
+def run_log1p(a: torch.Tensor, out: torch.Tensor) -> None:
+    _run_unary_elementwise("log1p", RefOpKind.REF_OP_LOG1P, a, out)
+
+
+def run_log2(a: torch.Tensor, out: torch.Tensor) -> None:
+    _run_unary_elementwise("log2", RefOpKind.REF_OP_LOG2, a, out)
+
+
+def run_log10(a: torch.Tensor, out: torch.Tensor) -> None:
+    _run_unary_elementwise("log10", RefOpKind.REF_OP_LOG10, a, out)
+
+
+def run_rsqrt(a: torch.Tensor, out: torch.Tensor) -> None:
+    _run_unary_elementwise("rsqrt", RefOpKind.REF_OP_RSQRT, a, out)
+
+
+def run_sigmoid(a: torch.Tensor, out: torch.Tensor) -> None:
+    _run_unary_elementwise("sigmoid", RefOpKind.REF_OP_SIGMOID, a, out)
+
+
+def run_sign(a: torch.Tensor, out: torch.Tensor) -> None:
+    _run_unary_elementwise("sign", RefOpKind.REF_OP_SIGN, a, out)
+
+
+def run_round(a: torch.Tensor, out: torch.Tensor) -> None:
+    _run_unary_elementwise("round", RefOpKind.REF_OP_ROUND, a, out)
+
+
+def run_trunc(a: torch.Tensor, out: torch.Tensor) -> None:
+    _run_unary_elementwise("trunc", RefOpKind.REF_OP_TRUNC, a, out)
 
 
 def run_tanh(a: torch.Tensor, out: torch.Tensor) -> None:

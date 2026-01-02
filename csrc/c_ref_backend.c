@@ -24,6 +24,26 @@ int ref_run_sqrt(const RefOpCall *call, char *err_msg, size_t err_cap);
 int ref_run_log(const RefOpCall *call, char *err_msg, size_t err_cap);
 int ref_run_sin(const RefOpCall *call, char *err_msg, size_t err_cap);
 int ref_run_cos(const RefOpCall *call, char *err_msg, size_t err_cap);
+int ref_run_acos(const RefOpCall *call, char *err_msg, size_t err_cap);
+int ref_run_acosh(const RefOpCall *call, char *err_msg, size_t err_cap);
+int ref_run_asin(const RefOpCall *call, char *err_msg, size_t err_cap);
+int ref_run_asinh(const RefOpCall *call, char *err_msg, size_t err_cap);
+int ref_run_atan(const RefOpCall *call, char *err_msg, size_t err_cap);
+int ref_run_atanh(const RefOpCall *call, char *err_msg, size_t err_cap);
+int ref_run_cosh(const RefOpCall *call, char *err_msg, size_t err_cap);
+int ref_run_sinh(const RefOpCall *call, char *err_msg, size_t err_cap);
+int ref_run_tan(const RefOpCall *call, char *err_msg, size_t err_cap);
+int ref_run_erf(const RefOpCall *call, char *err_msg, size_t err_cap);
+int ref_run_erfc(const RefOpCall *call, char *err_msg, size_t err_cap);
+int ref_run_expm1(const RefOpCall *call, char *err_msg, size_t err_cap);
+int ref_run_log1p(const RefOpCall *call, char *err_msg, size_t err_cap);
+int ref_run_log2(const RefOpCall *call, char *err_msg, size_t err_cap);
+int ref_run_log10(const RefOpCall *call, char *err_msg, size_t err_cap);
+int ref_run_rsqrt(const RefOpCall *call, char *err_msg, size_t err_cap);
+int ref_run_sigmoid(const RefOpCall *call, char *err_msg, size_t err_cap);
+int ref_run_sign(const RefOpCall *call, char *err_msg, size_t err_cap);
+int ref_run_round(const RefOpCall *call, char *err_msg, size_t err_cap);
+int ref_run_trunc(const RefOpCall *call, char *err_msg, size_t err_cap);
 int ref_run_tanh(const RefOpCall *call, char *err_msg, size_t err_cap);
 int ref_run_floor(const RefOpCall *call, char *err_msg, size_t err_cap);
 int ref_run_ceil(const RefOpCall *call, char *err_msg, size_t err_cap);
@@ -69,6 +89,46 @@ REF_BACKEND_API int ref_run_op(
             return ref_run_sin(call, err_msg, err_cap);
         case REF_OP_COS:
             return ref_run_cos(call, err_msg, err_cap);
+        case REF_OP_ACOS:
+            return ref_run_acos(call, err_msg, err_cap);
+        case REF_OP_ACOSH:
+            return ref_run_acosh(call, err_msg, err_cap);
+        case REF_OP_ASIN:
+            return ref_run_asin(call, err_msg, err_cap);
+        case REF_OP_ASINH:
+            return ref_run_asinh(call, err_msg, err_cap);
+        case REF_OP_ATAN:
+            return ref_run_atan(call, err_msg, err_cap);
+        case REF_OP_ATANH:
+            return ref_run_atanh(call, err_msg, err_cap);
+        case REF_OP_COSH:
+            return ref_run_cosh(call, err_msg, err_cap);
+        case REF_OP_SINH:
+            return ref_run_sinh(call, err_msg, err_cap);
+        case REF_OP_TAN:
+            return ref_run_tan(call, err_msg, err_cap);
+        case REF_OP_ERF:
+            return ref_run_erf(call, err_msg, err_cap);
+        case REF_OP_ERFC:
+            return ref_run_erfc(call, err_msg, err_cap);
+        case REF_OP_EXPM1:
+            return ref_run_expm1(call, err_msg, err_cap);
+        case REF_OP_LOG1P:
+            return ref_run_log1p(call, err_msg, err_cap);
+        case REF_OP_LOG2:
+            return ref_run_log2(call, err_msg, err_cap);
+        case REF_OP_LOG10:
+            return ref_run_log10(call, err_msg, err_cap);
+        case REF_OP_RSQRT:
+            return ref_run_rsqrt(call, err_msg, err_cap);
+        case REF_OP_SIGMOID:
+            return ref_run_sigmoid(call, err_msg, err_cap);
+        case REF_OP_SIGN:
+            return ref_run_sign(call, err_msg, err_cap);
+        case REF_OP_ROUND:
+            return ref_run_round(call, err_msg, err_cap);
+        case REF_OP_TRUNC:
+            return ref_run_trunc(call, err_msg, err_cap);
         case REF_OP_TANH:
             return ref_run_tanh(call, err_msg, err_cap);
         case REF_OP_FLOOR:

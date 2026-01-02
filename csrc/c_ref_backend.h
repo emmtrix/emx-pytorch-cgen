@@ -59,7 +59,27 @@ typedef enum RefOpKind {
     REF_OP_FLOOR = 17,
     REF_OP_CEIL = 18,
     REF_OP_RECIPROCAL = 19,
-    REF_OP_RELU = 20
+    REF_OP_RELU = 20,
+    REF_OP_ACOS = 21,
+    REF_OP_ACOSH = 22,
+    REF_OP_ASIN = 23,
+    REF_OP_ASINH = 24,
+    REF_OP_ATAN = 25,
+    REF_OP_ATANH = 26,
+    REF_OP_COSH = 27,
+    REF_OP_SINH = 28,
+    REF_OP_TAN = 29,
+    REF_OP_ERF = 30,
+    REF_OP_ERFC = 31,
+    REF_OP_EXPM1 = 32,
+    REF_OP_LOG1P = 33,
+    REF_OP_LOG2 = 34,
+    REF_OP_LOG10 = 35,
+    REF_OP_RSQRT = 36,
+    REF_OP_SIGMOID = 37,
+    REF_OP_SIGN = 38,
+    REF_OP_ROUND = 39,
+    REF_OP_TRUNC = 40
 } RefOpKind;
 
 typedef struct RefBroadcastInDimParams {
