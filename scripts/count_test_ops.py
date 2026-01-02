@@ -32,13 +32,8 @@ def _count_executed_tests() -> dict[str, dict[str, int]]:
             dtypes = sorted(op_dtypes & set(allowed_dtypes), key=_dtype_name)
 
         for dtype in dtypes:
-            counts[op.name]["matches"] += 1
-            if constraints["skip_invalid_shape_tests"]:
-                continue
-            arity = test_ops._get_op_arity(op, device, dtype, constraints)
-            if arity is None:
-                continue
-            counts[op.name]["invalid"] += 1
+            for _ in test_ops._iter_supported_samples(op, device, dtype, constraints):
+                counts[op.name]["matches"] += 1
 
     return counts
 
