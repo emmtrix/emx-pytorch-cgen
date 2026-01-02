@@ -1,5 +1,5 @@
 #include <stdint.h>
-#include "ops_scalar.h"
+#include "ops_scalar_f32.h"
 
 void node1_matmul_f32(const float a[4][3], const float b[3][5], float out[4][5]) {
     for (int64_t i = 0; i < 4; ++i) {

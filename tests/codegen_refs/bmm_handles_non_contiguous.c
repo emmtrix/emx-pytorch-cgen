@@ -1,5 +1,5 @@
 #include <stdint.h>
-#include "ops_scalar.h"
+#include "ops_scalar_f32.h"
 
 void node1_bmm_f32(const float a[2][4][3], const float b[2][3][5], float out[2][4][5]) {
     for (int64_t b_idx = 0; b_idx < 2; ++b_idx) {
