@@ -8,6 +8,14 @@
 extern "C" {
 #endif
 
+#if defined(_WIN32)
+#define REF_BACKEND_API __declspec(dllexport)
+#elif defined(__GNUC__)
+#define REF_BACKEND_API __attribute__((visibility("default")))
+#else
+#define REF_BACKEND_API
+#endif
+
 typedef enum RefDType {
     REF_F32 = 0
 } RefDType;
@@ -57,7 +65,11 @@ typedef struct RefBroadcastInDimParams {
     int32_t *broadcast_dimensions;
 } RefBroadcastInDimParams;
 
-int ref_run_op(int32_t op_kind, const RefOpCall *call, char *err_msg, size_t err_cap);
+REF_BACKEND_API int ref_run_op(
+    int32_t op_kind,
+    const RefOpCall *call,
+    char *err_msg,
+    size_t err_cap);
 
 #ifdef __cplusplus
 }
