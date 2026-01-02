@@ -123,6 +123,7 @@ class _GenericLibrary:
 
 
 _LIBRARY_CACHE: Dict[str, object] = {}
+_C_SRC_DIR = Path(__file__).resolve().parents[2] / "csrc"
 
 
 def _format_array_suffix(shape: Sequence[int]) -> str:
@@ -152,14 +153,13 @@ def _write_elementwise_kernel(
             )
             indent += "    "
     index_expr = "".join(f"[i{dim}]" for dim in range(len(shape))) or "[0]"
+    scalar_fn = f"ref_scalar_{op_spec.name}"
     if op_spec.kind == "binary":
         lines.append(
-            f"{indent}out{index_expr} = a{index_expr} {op_spec.symbol} b{index_expr};"
+            f"{indent}out{index_expr} = {scalar_fn}(a{index_expr}, b{index_expr});"
         )
     else:
-        lines.append(
-            f"{indent}out{index_expr} = a{index_expr} > 0.0f ? a{index_expr} : 0.0f;"
-        )
+        lines.append(f"{indent}out{index_expr} = {scalar_fn}(a{index_expr});")
     if shape:
         for _ in range(len(shape)):
             indent = indent[:-4]
@@ -222,6 +222,7 @@ def _write_generic_source(graph: _GenericGraph) -> str:
     op_nodes = graph.op_nodes
     lines = [
         "#include <stdint.h>",
+        "#include \"ops_scalar.h\"",
         "",
     ]
     for index, op_node in enumerate(op_nodes, start=1):
@@ -434,6 +435,8 @@ def _compile_generic_library(graph: _GenericGraph) -> _GenericLibrary:
         "-shared",
         "-O3",
         "-fPIC",
+        "-I",
+        str(_C_SRC_DIR),
         str(c_path),
         "-o",
         str(so_path),

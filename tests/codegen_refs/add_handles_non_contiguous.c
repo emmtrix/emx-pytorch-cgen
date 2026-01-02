@@ -1,9 +1,10 @@
 #include <stdint.h>
+#include "ops_scalar.h"
 
 void node1_add_f32(const float a[4][4], const float b[4][4], float out[4][4]) {
     for (int64_t i0 = 0; i0 < 4; ++i0) {
         for (int64_t i1 = 0; i1 < 4; ++i1) {
-            out[i0][i1] = a[i0][i1] + b[i0][i1];
+            out[i0][i1] = ref_scalar_add(a[i0][i1], b[i0][i1]);
         }
     }
 }
