@@ -223,6 +223,9 @@ OP_TEST_CONFIG = {
     "ceil": {
         "allowed_dtypes": (torch.float32,),
     },
+    "cbrt": {
+        "allowed_dtypes": (torch.float32,),
+    },
     "reciprocal": {
         "allowed_dtypes": (torch.float32,),
     },
