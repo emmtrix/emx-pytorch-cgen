@@ -1061,6 +1061,14 @@ SUPPORTED_OPS = {
             torch.ops.aten.square_,
         ),
     ),
+    "sum": _OpSpec(
+        name="sum",
+        kind="reduction",
+        symbol=None,
+        supported_targets={
+            torch.ops.aten.sum.default,
+        },
+    ),
     "matmul": _OpSpec(
         name="matmul",
         kind="matmul",
@@ -1469,6 +1477,46 @@ def _write_matmul_kernel(
     return rendered.strip().splitlines()
 
 
+def _write_sum_kernel(
+    node_index: int,
+    op_spec: _OpSpec,
+    input_shape: Sequence[int],
+    input_strides: Sequence[int],
+) -> List[str]:
+    sum_template = _get_template_env().get_template("sum_kernel.c.j2")
+    a_is_contiguous = _is_contiguous(input_shape, input_strides)
+    rank = len(input_shape)
+    numel = 1
+    for size in input_shape:
+        numel *= size
+    signature = (
+        f"void node{node_index}_{op_spec.name}_f32("
+        f"const float a{_format_array_suffix(input_shape)}, "
+        f"float out{_format_array_suffix(())}) {{"
+    )
+    indices = tuple(f"i{dim}" for dim in range(rank))
+    scalar_access = _emit_strided_access(
+        "a", ("0",), (1,), contig=False, sizes=(1,)
+    )
+    flat_access = _emit_strided_access(
+        "a", ("i",), (1,), contig=False, sizes=(numel,)
+    )
+    nested_access = _emit_strided_access(
+        "a", indices, input_strides, contig=a_is_contiguous, sizes=input_shape
+    )
+    rendered = sum_template.render(
+        signature=signature,
+        rank=rank,
+        sizes=[{"dim": dim, "size": size} for dim, size in enumerate(input_shape)],
+        flat=a_is_contiguous and rank > 0,
+        numel=numel,
+        scalar_access=scalar_access,
+        flat_access=flat_access,
+        nested_access=nested_access,
+    )
+    return rendered.strip().splitlines()
+
+
 def _write_generic_source(graph: _GenericGraph) -> str:
     placeholders = graph.tensor_placeholders
     op_nodes = graph.op_nodes
@@ -1489,6 +1537,14 @@ def _write_generic_source(graph: _GenericGraph) -> str:
                 input_shapes,
                 input_strides,
                 output_strides,
+            )
+        elif op_node.spec.kind == "reduction":
+            input_node = op_node.inputs[0]
+            kernel_lines = _write_sum_kernel(
+                index,
+                op_node.spec,
+                graph.shapes[input_node],
+                graph.strides[input_node],
             )
         else:
             lhs, rhs = op_node.inputs
@@ -1582,6 +1638,8 @@ def _infer_output_shape(
         return _broadcast_output_shape(op_spec, a_shape, b_shape)
     if op_spec.kind == "unary":
         return input_shapes[0]
+    if op_spec.kind == "reduction":
+        return ()
     a_shape, b_shape = input_shapes
     if op_spec.name == "matmul":
         if len(a_shape) != 2 or len(b_shape) != 2:
@@ -1632,7 +1690,7 @@ def _analyze_generic_graph(
                 raise RefBackendError(f"Unsupported call_function: {node.target}")
             op_spec = target_info.op_spec
             inplace_input = target_info.inplace_arg_index
-            expected_arity = 1 if op_spec.kind == "unary" else 2
+            expected_arity = 1 if op_spec.kind in {"unary", "reduction"} else 2
             if len(node.args) != expected_arity:
                 if expected_arity == 1:
                     raise RefBackendError(

@@ -203,6 +203,7 @@ CODEGEN_ATEN_OPS = [
     torch.ops.aten.sqrt.default,
     torch.ops.aten.square.default,
     torch.ops.aten.sub.Tensor,
+    torch.ops.aten.sum.default,
     torch.ops.aten.tan.default,
     torch.ops.aten.tanh.default,
     torch.ops.aten.transpose.int,
@@ -340,6 +341,9 @@ CODEGEN_OP_TEST_CONFIG = {
     torch.ops.aten.transpose.int: {
         "allow_non_tensor_args": True,
     },
+    torch.ops.aten.sum.default: {
+        "sample_filter": lambda sample: sample.input.shape == (3, 5),
+    },
 }
 DEFAULT_CONSTRAINTS = {
     "allowed_dtypes": (torch.float32,),
@@ -474,6 +478,23 @@ class TestCodegenInplaceOps(TestCase):
 
                 torch.testing.assert_close(compiled_result, expected_result)
                 torch.testing.assert_close(compiled_lhs, expected)
+
+
+class TestCodegenReductionOps(TestCase):
+    def test_codegen_sum_default_cases(self):
+        cases = [
+            torch.randn(2, 3, dtype=torch.float32),
+            torch.randn(4, dtype=torch.float32),
+            torch.tensor(3.5, dtype=torch.float32),
+            torch.randn(0, 3, dtype=torch.float32),
+            torch.randn(2, 3, dtype=torch.float32).t(),
+        ]
+        for tensor in cases:
+            compiled = _compile_codegen_op(torch.ops.aten.sum.default)
+            result = compiled(tensor)
+            expected = torch.ops.aten.sum.default(tensor)
+            assert result.shape == torch.Size([])
+            torch.testing.assert_close(result, expected)
 
 
 instantiate_device_type_tests(TestCodegenOpInfo, globals(), only_for="cpu")

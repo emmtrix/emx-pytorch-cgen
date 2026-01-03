@@ -1587,7 +1587,7 @@ sub                                      yes   yes
 sub_                                     -     yes    
 subtract                                 -     -      
 subtract_                                -     -      
-sum                                      -     -      
+sum                                      -     yes    
 sum_to_size                              -     -      
 svd                                      -     -      
 swapaxes                                 -     -      
@@ -1718,8 +1718,8 @@ zfill                                    -     -
 Summary
 total aten ops: 1714
 supported by cref only: 7
-supported by codegen only: 6
+supported by codegen only: 7
 supported by both: 73
-unsupported by either: 1628
-supported by codegen: 79 / 1714 (4.6 %)
+unsupported by either: 1627
+supported by codegen: 80 / 1714 (4.7 %)
 supported by c-ref: 80 / 1714 (4.7 %)
