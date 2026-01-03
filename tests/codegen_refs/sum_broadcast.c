@@ -1,0 +1,30 @@
+#include <stdint.h>
+#include "ops_scalar_f32.h"
+
+void node1_add_f32(const float a[2][3][4], const float b[1][4], float out[2][3][4]) {
+    for (int64_t i0 = 0; i0 < 2; ++i0) {
+        for (int64_t i1 = 0; i1 < 3; ++i1) {
+            for (int64_t i2 = 0; i2 < 4; ++i2) {
+                out[i0][i1][i2] = ref_scalar_f32_add(a[i0][i1][i2], b[0][i2]);
+            }
+        }
+    }
+}
+
+void node2_sum_f32(const float a[2][3][4], float out[2][4]) {
+    for (int64_t i0 = 0; i0 < 2; ++i0) {
+    for (int64_t i1 = 0; i1 < 4; ++i1) {
+    float acc = 0.0f;
+    for (int64_t r1 = 0; r1 < 3; ++r1) {
+        acc += a[i0][r1][i1];
+    }
+    out[i0][i1] = acc;
+    }
+    }
+}
+
+void ref_codegen_main_f32(const float input_0[2][3][4], const float input_1[1][4], float out[2][4]) {
+    float tmp_0[2][3][4];
+    node1_add_f32(input_0, input_1, tmp_0);
+    node2_sum_f32(tmp_0, out);
+}
