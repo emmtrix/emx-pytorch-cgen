@@ -1140,6 +1140,8 @@ class _OpNode:
     inputs: Tuple[torch.fx.Node, ...]
     output_shape: Tuple[int, ...]
     inplace_input: int | None = None
+    reduction_dims: Tuple[int, ...] | None = None
+    keepdim: bool = False
 
 
 @dataclass
@@ -1482,37 +1484,61 @@ def _write_sum_kernel(
     op_spec: _OpSpec,
     input_shape: Sequence[int],
     input_strides: Sequence[int],
+    output_shape: Sequence[int],
+    output_strides: Sequence[int],
+    reduction_dims: Tuple[int, ...],
+    keepdim: bool,
 ) -> List[str]:
     sum_template = _get_template_env().get_template("sum_kernel.c.j2")
     a_is_contiguous = _is_contiguous(input_shape, input_strides)
-    rank = len(input_shape)
-    numel = 1
-    for size in input_shape:
-        numel *= size
+    input_rank = len(input_shape)
+    output_rank = len(output_shape)
+    reduction_set = set(reduction_dims)
     signature = (
         f"void node{node_index}_{op_spec.name}_f32("
         f"const float a{_format_array_suffix(input_shape)}, "
-        f"float out{_format_array_suffix(())}) {{"
+        f"float out{_format_array_suffix(output_shape)}) {{"
     )
-    indices = tuple(f"i{dim}" for dim in range(rank))
-    scalar_access = _emit_strided_access(
-        "a", ("0",), (1,), contig=False, sizes=(1,)
-    )
-    flat_access = _emit_strided_access(
-        "a", ("i",), (1,), contig=False, sizes=(numel,)
-    )
-    nested_access = _emit_strided_access(
-        "a", indices, input_strides, contig=a_is_contiguous, sizes=input_shape
-    )
+    output_access = emit_output_access(output_shape, output_strides)
+    if input_rank == 0:
+        input_access = "a[0]"
+    else:
+        if keepdim:
+            input_indices = [
+                f"r{dim}" if dim in reduction_set else f"i{dim}"
+                for dim in range(input_rank)
+            ]
+        else:
+            dim_to_output: Dict[int, int] = {}
+            output_idx = 0
+            for dim in range(input_rank):
+                if dim in reduction_set:
+                    continue
+                dim_to_output[dim] = output_idx
+                output_idx += 1
+            input_indices = [
+                f"r{dim}" if dim in reduction_set else f"i{dim_to_output[dim]}"
+                for dim in range(input_rank)
+            ]
+        input_access = _emit_strided_access(
+            "a",
+            input_indices,
+            input_strides,
+            contig=a_is_contiguous,
+            sizes=input_shape,
+        )
     rendered = sum_template.render(
         signature=signature,
-        rank=rank,
-        sizes=[{"dim": dim, "size": size} for dim, size in enumerate(input_shape)],
-        flat=a_is_contiguous and rank > 0,
-        numel=numel,
-        scalar_access=scalar_access,
-        flat_access=flat_access,
-        nested_access=nested_access,
+        input_rank=input_rank,
+        output_rank=output_rank,
+        output_dims=[
+            {"dim": dim, "size": size} for dim, size in enumerate(output_shape)
+        ],
+        reduction_dims=[
+            {"dim": dim, "size": input_shape[dim]} for dim in reduction_dims
+        ],
+        input_access=input_access,
+        output_access=output_access,
     )
     return rendered.strip().splitlines()
 
@@ -1545,6 +1571,10 @@ def _write_generic_source(graph: _GenericGraph) -> str:
                 op_node.spec,
                 graph.shapes[input_node],
                 graph.strides[input_node],
+                op_node.output_shape,
+                graph.strides[op_node.node],
+                op_node.reduction_dims or (),
+                op_node.keepdim,
             )
         else:
             lhs, rhs = op_node.inputs
@@ -1656,6 +1686,106 @@ def _infer_output_shape(
     return (a_shape[0], a_shape[1], b_shape[2])
 
 
+def _normalize_reduction_dims(
+    dim: object | None, rank: int
+) -> Tuple[int, ...]:
+    if dim is None:
+        return tuple(range(rank))
+    if isinstance(dim, torch.fx.Node):
+        raise RefBackendError("codegen sum expects dim to be an int or tuple of ints")
+    if isinstance(dim, (tuple, list)):
+        dims = dim
+    else:
+        dims = (dim,)
+    normalized: List[int] = []
+    seen: set[int] = set()
+    for item in dims:
+        if isinstance(item, torch.fx.Node):
+            raise RefBackendError(
+                "codegen sum expects dim to be an int or tuple of ints"
+            )
+        try:
+            dim_value = operator.index(item)
+        except TypeError as exc:
+            raise RefBackendError(
+                "codegen sum expects dim to be an int or tuple of ints"
+            ) from exc
+        if dim_value < 0:
+            dim_value += rank
+        if dim_value < 0 or dim_value >= rank:
+            raise RefBackendError("codegen sum dim is out of range")
+        if dim_value in seen:
+            continue
+        seen.add(dim_value)
+        normalized.append(dim_value)
+    return tuple(sorted(normalized))
+
+
+def _infer_sum_output_shape(
+    input_shape: Sequence[int],
+    reduction_dims: Tuple[int, ...],
+    keepdim: bool,
+    *,
+    reduce_all: bool,
+) -> Tuple[int, ...]:
+    if reduce_all:
+        return ()
+    if not reduction_dims:
+        return tuple(input_shape)
+    if keepdim:
+        output_shape = list(input_shape)
+        for dim in reduction_dims:
+            output_shape[dim] = 1
+        return tuple(output_shape)
+    return tuple(
+        size for dim, size in enumerate(input_shape) if dim not in reduction_dims
+    )
+
+
+def _parse_sum_args(
+    node: torch.fx.Node, input_shape: Sequence[int]
+) -> Tuple[Tuple[int, ...], bool, bool]:
+    if not node.args:
+        raise RefBackendError("codegen sum expects one input")
+    if len(node.args) > 4:
+        raise RefBackendError("codegen sum expects at most four inputs")
+    dim = node.args[1] if len(node.args) > 1 else None
+    keepdim = node.args[2] if len(node.args) > 2 else False
+    dtype = node.args[3] if len(node.args) > 3 else None
+    if node.kwargs:
+        if "dim" in node.kwargs:
+            if dim is not None:
+                raise RefBackendError("codegen sum expects dim to be specified once")
+            dim = node.kwargs["dim"]
+        if "keepdim" in node.kwargs:
+            if len(node.args) > 2:
+                raise RefBackendError(
+                    "codegen sum expects keepdim to be specified once"
+                )
+            keepdim = node.kwargs["keepdim"]
+        if "dtype" in node.kwargs:
+            if dtype is not None:
+                raise RefBackendError("codegen sum expects dtype to be specified once")
+            dtype = node.kwargs["dtype"]
+        extra = set(node.kwargs) - {"dim", "keepdim", "dtype"}
+        if extra:
+            raise RefBackendError(
+                f"codegen sum got unexpected kwargs: {sorted(extra)}"
+            )
+    if isinstance(keepdim, torch.fx.Node):
+        raise RefBackendError("codegen sum expects keepdim to be a bool")
+    if not isinstance(keepdim, bool):
+        raise RefBackendError("codegen sum expects keepdim to be a bool")
+    if dtype is not None:
+        if isinstance(dtype, torch.fx.Node):
+            raise RefBackendError("codegen sum expects dtype to be torch.float32")
+        if dtype is not torch.float32:
+            raise RefBackendError("codegen sum expects dtype to be torch.float32")
+    reduction_dims = _normalize_reduction_dims(dim, len(input_shape))
+    reduce_all = dim is None
+    return reduction_dims, keepdim, reduce_all
+
+
 def _analyze_generic_graph(
     gm: torch.fx.GraphModule, example_inputs: Sequence[torch.Tensor]
 ) -> _GenericGraph:
@@ -1682,26 +1812,50 @@ def _analyze_generic_graph(
                 strides[node] = tuple(example.stride())
                 tensor_placeholders.append(node)
             continue
-        if node.op == "call_function":
-            if node.kwargs:
-                raise RefBackendError("codegen backend expects positional args only")
-            target_info = TARGET_REGISTRY.get(node.target)
-            if target_info is None:
-                raise RefBackendError(f"Unsupported call_function: {node.target}")
-            op_spec = target_info.op_spec
-            inplace_input = target_info.inplace_arg_index
-            expected_arity = 1 if op_spec.kind in {"unary", "reduction"} else 2
-            if len(node.args) != expected_arity:
-                if expected_arity == 1:
+        if node.op in {"call_function", "call_method"}:
+            if node.op == "call_method":
+                if node.target != "sum":
+                    raise RefBackendError(f"Unsupported call_method: {node.target}")
+                op_spec = SUPPORTED_OPS["sum"]
+                inplace_input = None
+            else:
+                target_info = TARGET_REGISTRY.get(node.target)
+                if target_info is None:
+                    raise RefBackendError(f"Unsupported call_function: {node.target}")
+                op_spec = target_info.op_spec
+                inplace_input = target_info.inplace_arg_index
+            reduction_dims: Tuple[int, ...] | None = None
+            keepdim = False
+            reduce_all = False
+            if op_spec.kind == "reduction":
+                if op_spec.name != "sum":
+                    raise RefBackendError(
+                        f"codegen backend does not support {op_spec.name}"
+                    )
+                if len(node.args) < 1:
                     raise RefBackendError(
                         f"codegen {op_spec.name} expects one input"
                     )
-                raise RefBackendError(
-                    f"codegen {op_spec.name} expects exactly two inputs"
-                )
+            else:
+                if node.kwargs:
+                    raise RefBackendError(
+                        "codegen backend expects positional args only"
+                    )
+                expected_arity = 1 if op_spec.kind == "unary" else 2
+                if len(node.args) != expected_arity:
+                    if expected_arity == 1:
+                        raise RefBackendError(
+                            f"codegen {op_spec.name} expects one input"
+                        )
+                    raise RefBackendError(
+                        f"codegen {op_spec.name} expects exactly two inputs"
+                    )
             input_nodes: List[torch.fx.Node] = []
             input_shapes: List[Tuple[int, ...]] = []
-            for arg in node.args:
+            args_to_check = node.args
+            if op_spec.kind == "reduction":
+                args_to_check = node.args[:1]
+            for arg in args_to_check:
                 if not isinstance(arg, torch.fx.Node):
                     raise RefBackendError(
                         f"codegen {op_spec.name} expects tensor inputs only"
@@ -1712,7 +1866,18 @@ def _analyze_generic_graph(
                     )
                 input_nodes.append(arg)
                 input_shapes.append(shapes[arg])
-            output_shape = _infer_output_shape(op_spec, input_shapes)
+            if op_spec.kind == "reduction":
+                reduction_dims, keepdim, reduce_all = _parse_sum_args(
+                    node, input_shapes[0]
+                )
+                output_shape = _infer_sum_output_shape(
+                    input_shapes[0],
+                    reduction_dims,
+                    keepdim,
+                    reduce_all=reduce_all,
+                )
+            else:
+                output_shape = _infer_output_shape(op_spec, input_shapes)
             shapes[node] = output_shape
             if inplace_input is not None:
                 strides[node] = strides[input_nodes[inplace_input]]
@@ -1725,6 +1890,8 @@ def _analyze_generic_graph(
                     inputs=tuple(input_nodes),
                     output_shape=output_shape,
                     inplace_input=inplace_input,
+                    reduction_dims=reduction_dims,
+                    keepdim=keepdim,
                 )
             )
             continue

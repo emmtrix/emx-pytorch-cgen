@@ -1,19 +1,21 @@
 {{ signature }}
-    float acc = 0.0f;
-{% if rank == 0 %}
-    acc += {{ scalar_access }};
-{% elif flat %}
-    for (int64_t i = 0; i < {{ numel }}; ++i) {
-        acc += {{ flat_access }};
-    }
-{% else %}
-{% for dim in sizes %}
+{% for dim in output_dims %}
     for (int64_t i{{ dim.dim }} = 0; i{{ dim.dim }} < {{ dim.size }}; ++i{{ dim.dim }}) {
 {% endfor %}
-        acc += {{ nested_access }};
-{% for dim in sizes | reverse %}
+    float acc = 0.0f;
+{% if input_rank == 0 %}
+    acc += {{ input_access }};
+{% else %}
+{% for dim in reduction_dims %}
+    for (int64_t r{{ dim.dim }} = 0; r{{ dim.dim }} < {{ dim.size }}; ++r{{ dim.dim }}) {
+{% endfor %}
+        acc += {{ input_access }};
+{% for dim in reduction_dims | reverse %}
     }
 {% endfor %}
 {% endif %}
-    out[0] = acc;
+    {{ output_access }} = acc;
+{% for dim in output_dims | reverse %}
+    }
+{% endfor %}
 }
