@@ -211,9 +211,69 @@ CODEGEN_ATEN_OPS = [
 ]
 INPLACE_ATEN_OPS = [
     torch.ops.aten.add_.Tensor,
+    torch.ops.aten.abs_.default,
+    torch.ops.aten.acos_.default,
+    torch.ops.aten.acosh_.default,
+    torch.ops.aten.asin_.default,
+    torch.ops.aten.asinh_.default,
+    torch.ops.aten.atan_.default,
+    torch.ops.aten.atan2_.default,
+    torch.ops.aten.atanh_.default,
+    torch.ops.aten.ceil_.default,
+    torch.ops.aten.clamp_max_.Tensor,
+    torch.ops.aten.clamp_min_.Tensor,
+    torch.ops.aten.conj_physical_.default,
+    torch.ops.aten.copysign_.Tensor,
+    torch.ops.aten.cos_.default,
+    torch.ops.aten.cosh_.default,
+    torch.ops.aten.deg2rad_.default,
+    torch.ops.aten.digamma_.default,
     torch.ops.aten.div_.Tensor,
+    torch.ops.aten.erf_.default,
+    torch.ops.aten.erfc_.default,
+    torch.ops.aten.erfinv_.default,
+    torch.ops.aten.exp_.default,
+    torch.ops.aten.exp2_.default,
+    torch.ops.aten.expm1_.default,
+    torch.ops.aten.floor_.default,
+    torch.ops.aten.floor_divide_.Tensor,
+    torch.ops.aten.fmod_.Tensor,
+    torch.ops.aten.frac_.default,
+    torch.ops.aten.heaviside_.default,
+    torch.ops.aten.hypot_.default,
+    torch.ops.aten.i0_.default,
+    torch.ops.aten.ldexp_.default,
+    torch.ops.aten.lgamma_.default,
+    torch.ops.aten.log_.default,
+    torch.ops.aten.log10_.default,
+    torch.ops.aten.log1p_.default,
+    torch.ops.aten.log2_.default,
+    torch.ops.aten.logit_.default,
     torch.ops.aten.mul_.Tensor,
+    torch.ops.aten.nan_to_num_.default,
+    torch.ops.aten.neg_.default,
+    torch.ops.aten.nextafter_.default,
+    torch.ops.aten.pow_.Tensor,
+    torch.ops.aten.rad2deg_.default,
+    torch.ops.aten.reciprocal_.default,
+    torch.ops.aten.relu_.default,
+    torch.ops.aten.remainder_.Tensor,
+    torch.ops.aten.round_.default,
+    torch.ops.aten.rsqrt_.default,
+    torch.ops.aten.sgn_.default,
+    torch.ops.aten.sigmoid_.default,
+    torch.ops.aten.sign_.default,
+    torch.ops.aten.sin_.default,
+    torch.ops.aten.sinc_.default,
+    torch.ops.aten.silu_.default,
+    torch.ops.aten.sinh_.default,
+    torch.ops.aten.sqrt_.default,
+    torch.ops.aten.square_.default,
     torch.ops.aten.sub_.Tensor,
+    torch.ops.aten.tan_.default,
+    torch.ops.aten.tanh_.default,
+    torch.ops.aten.trunc_.default,
+    torch.ops.aten.xlogy_.Tensor,
 ]
 
 
@@ -306,10 +366,51 @@ def _compile_codegen_op(aten_overload):
 
 
 def _compile_codegen_inplace_op(aten_overload):
-    def compiled_fn(lhs: torch.Tensor, rhs: torch.Tensor) -> torch.Tensor:
+    def compiled_fn(lhs: torch.Tensor, rhs: torch.Tensor | None = None) -> torch.Tensor:
+        if rhs is None:
+            return aten_overload(lhs)
         return aten_overload(lhs, rhs)
 
     return torch.compile(compiled_fn, backend=codegen_generic_backend)
+
+
+def _sanitize_inplace_inputs(
+    aten_overload: torch._ops.OpOverload, lhs: torch.Tensor, rhs: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor]:
+    name = aten_overload._schema.name.split("::")[-1]
+    unit_range_ops = {"acos_", "asin_", "atanh_", "erfinv_"}
+    ge1_ops = {"acosh_"}
+    positive_ops = {"digamma_", "lgamma_", "log_", "log10_", "log2_", "rsqrt_", "sqrt_"}
+    log1p_ops = {"log1p_"}
+    logit_ops = {"logit_"}
+    reciprocal_ops = {"reciprocal_"}
+    pow_ops = {"pow_"}
+    rhs_nonzero_ops = {"div_", "floor_divide_", "fmod_", "remainder_"}
+    xlogy_ops = {"xlogy_"}
+    ldexp_ops = {"ldexp_"}
+
+    if name in unit_range_ops:
+        lhs = lhs.tanh()
+    if name in ge1_ops:
+        lhs = lhs.abs() + 1
+    if name in positive_ops:
+        lhs = lhs.abs() + 0.1
+    if name in log1p_ops:
+        lhs = lhs.abs()
+    if name in logit_ops:
+        lhs = lhs.sigmoid().clamp(1e-4, 1 - 1e-4)
+    if name in reciprocal_ops:
+        lhs = lhs.sign() * (lhs.abs() + 0.1)
+    if name in pow_ops:
+        lhs = lhs.abs() + 0.1
+    if name in rhs_nonzero_ops:
+        rhs = rhs.sign() * (rhs.abs() + 0.1)
+    if name in xlogy_ops:
+        rhs = rhs.abs() + 0.1
+    if name in ldexp_ops:
+        rhs = rhs.round()
+
+    return lhs, rhs
 
 
 class TestCodegenOpInfo(TestCase):
@@ -345,16 +446,31 @@ class TestCodegenInplaceOps(TestCase):
         )
 
         for aten_overload in INPLACE_ATEN_OPS:
+            required_args = [
+                arg
+                for arg in aten_overload._schema.arguments
+                if not arg.kwarg_only and not arg.has_default_value()
+            ]
+            requires_rhs = len(required_args) > 1
             compiled = _compile_codegen_inplace_op(aten_overload)
             for lhs_shape, rhs_shape in sample_shapes:
                 lhs = torch.randn(lhs_shape, device=device, dtype=dtype)
                 rhs = torch.randn(rhs_shape, device=device, dtype=dtype)
+                lhs, rhs = _sanitize_inplace_inputs(aten_overload, lhs, rhs)
 
                 expected = lhs.clone()
-                expected_result = aten_overload(expected, rhs)
+                if requires_rhs:
+                    args = (expected, rhs)
+                else:
+                    args = (expected,)
+                expected_result = aten_overload(*args)
 
                 compiled_lhs = lhs.clone()
-                compiled_result = compiled(compiled_lhs, rhs)
+                if requires_rhs:
+                    compiled_args = (compiled_lhs, rhs)
+                else:
+                    compiled_args = (compiled_lhs,)
+                compiled_result = compiled(*compiled_args)
 
                 torch.testing.assert_close(compiled_result, expected_result)
                 torch.testing.assert_close(compiled_lhs, expected)
