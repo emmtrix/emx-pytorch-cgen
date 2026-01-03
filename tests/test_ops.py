@@ -202,6 +202,9 @@ OP_TEST_CONFIG = {
     "sigmoid": {
         "allowed_dtypes": (torch.float32,),
     },
+    "silu": {
+        "allowed_dtypes": (torch.float32,),
+    },
     "sign": {
         "allowed_dtypes": (torch.float32,),
     },

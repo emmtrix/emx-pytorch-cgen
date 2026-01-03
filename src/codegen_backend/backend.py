@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Sequence, Tuple
 
 import torch
+import torch.nn.functional as F
 from importlib import resources
 from jinja2 import Environment, FileSystemLoader
 import torch.fx
@@ -525,6 +526,16 @@ SUPPORTED_OPS = {
             torch.ops.aten.sigmoid_,
         ),
     ),
+    "silu": _unary_spec(
+        "silu",
+        (
+            F.silu,
+            torch.ops.aten.silu.default,
+            torch.ops.aten.silu,
+            torch.ops.aten.silu_.default,
+            torch.ops.aten.silu_,
+        ),
+    ),
     "sign": _unary_spec(
         "sign",
         (
@@ -910,6 +921,8 @@ INPLACE_TARGETS = {
     torch.ops.aten.rsqrt_: 0,
     torch.ops.aten.sigmoid_.default: 0,
     torch.ops.aten.sigmoid_: 0,
+    torch.ops.aten.silu_.default: 0,
+    torch.ops.aten.silu_: 0,
     torch.ops.aten.sign_.default: 0,
     torch.ops.aten.sign_: 0,
     torch.ops.aten.round_.default: 0,

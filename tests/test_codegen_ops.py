@@ -199,6 +199,7 @@ CODEGEN_OP_NAMES = {
     "rsqrt",
     "sgn",
     "sigmoid",
+    "silu",
     "sign",
     "sin",
     "sinc",

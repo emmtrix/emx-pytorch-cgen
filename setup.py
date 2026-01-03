@@ -53,6 +53,7 @@ setup(
                 "csrc/ops_log10.c",
                 "csrc/ops_rsqrt.c",
                 "csrc/ops_sigmoid.c",
+                "csrc/ops_silu.c",
                 "csrc/ops_sign.c",
                 "csrc/ops_round.c",
                 "csrc/ops_trunc.c",
