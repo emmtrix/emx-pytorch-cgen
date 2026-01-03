@@ -1135,7 +1135,7 @@ logit_backward                           -     -
 logspace                                 -     -      
 logsumexp                                -     -      
 lower                                    -     -      
-lstm                                     -     -      
+lstm                                     yes   -      
 lstm_cell                                -     -      
 lstm_mps_backward                        -     -      
 lstrip                                   -     -      
@@ -1654,7 +1654,7 @@ true_divide_                             -     -
 trunc                                    yes   yes    
 trunc_                                   -     -      
 type_as                                  -     -      
-unbind                                   -     -      
+unbind                                   yes   -      
 unbind_copy                              -     -      
 unflatten                                -     -      
 unflatten_dense_tensors                  -     -      
