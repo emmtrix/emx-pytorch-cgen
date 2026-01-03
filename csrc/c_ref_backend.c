@@ -42,6 +42,7 @@ int ref_run_log2(const RefOpCall *call, char *err_msg, size_t err_cap);
 int ref_run_log10(const RefOpCall *call, char *err_msg, size_t err_cap);
 int ref_run_rsqrt(const RefOpCall *call, char *err_msg, size_t err_cap);
 int ref_run_sigmoid(const RefOpCall *call, char *err_msg, size_t err_cap);
+int ref_run_silu(const RefOpCall *call, char *err_msg, size_t err_cap);
 int ref_run_sign(const RefOpCall *call, char *err_msg, size_t err_cap);
 int ref_run_round(const RefOpCall *call, char *err_msg, size_t err_cap);
 int ref_run_trunc(const RefOpCall *call, char *err_msg, size_t err_cap);
@@ -161,6 +162,8 @@ REF_BACKEND_API int ref_run_op(
             return ref_run_rsqrt(call, err_msg, err_cap);
         case REF_OP_SIGMOID:
             return ref_run_sigmoid(call, err_msg, err_cap);
+        case REF_OP_SILU:
+            return ref_run_silu(call, err_msg, err_cap);
         case REF_OP_SIGN:
             return ref_run_sign(call, err_msg, err_cap);
         case REF_OP_ROUND:

@@ -91,7 +91,8 @@ class RefOpKind:
     REF_OP_LDEXP = 73
     REF_OP_CLAMP_MIN = 74
     REF_OP_CLAMP_MAX = 75
-    REF_OP_CBRT = 76
+    REF_OP_SILU = 76
+    REF_OP_CBRT = 77
 
 
 class RefTensorView(ctypes.Structure):
@@ -491,6 +492,10 @@ def run_rsqrt(a: torch.Tensor, out: torch.Tensor) -> None:
 
 def run_sigmoid(a: torch.Tensor, out: torch.Tensor) -> None:
     _run_unary_elementwise("sigmoid", RefOpKind.REF_OP_SIGMOID, a, out)
+
+
+def run_silu(a: torch.Tensor, out: torch.Tensor) -> None:
+    _run_unary_elementwise("silu", RefOpKind.REF_OP_SILU, a, out)
 
 
 def run_sign(a: torch.Tensor, out: torch.Tensor) -> None:

@@ -249,6 +249,10 @@ static inline float ref_scalar_f32_sigmoid(float a) {
     return 1.0f / (1.0f + expf(-a));
 }
 
+static inline float ref_scalar_f32_silu(float a) {
+    return a / (1.0f + expf(-a));
+}
+
 static inline float ref_scalar_f32_sign(float a) {
     if (isnan(a)) {
         return a;

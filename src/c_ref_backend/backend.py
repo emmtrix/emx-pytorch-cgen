@@ -3,6 +3,7 @@ from typing import Callable, Dict, List
 
 import torch
 import torch.fx
+import torch.nn.functional as F
 from torch.fx.immutable_collections import immutable_list
 from torch._decomp import get_decompositions
 from torch._functorch.aot_autograd import aot_module_simplified
@@ -77,6 +78,7 @@ from .cffi_bindings import (
     run_square,
     run_rsqrt,
     run_sigmoid,
+    run_silu,
     run_sin,
     run_sign,
     run_sinh,
@@ -370,6 +372,12 @@ def _run_rsqrt(a: torch.Tensor) -> torch.Tensor:
 def _run_sigmoid(a: torch.Tensor) -> torch.Tensor:
     out = torch.empty_like(a, memory_format=torch.contiguous_format)
     run_sigmoid(a, out)
+    return out
+
+
+def _run_silu(a: torch.Tensor) -> torch.Tensor:
+    out = torch.empty_like(a, memory_format=torch.contiguous_format)
+    run_silu(a, out)
     return out
 
 
@@ -762,6 +770,9 @@ def _compile_graph(
         torch.sigmoid: ("sigmoid", _run_sigmoid),
         torch.ops.aten.sigmoid.default: ("sigmoid", _run_sigmoid),
         torch.ops.aten.sigmoid: ("sigmoid", _run_sigmoid),
+        F.silu: ("silu", _run_silu),
+        torch.ops.aten.silu.default: ("silu", _run_silu),
+        torch.ops.aten.silu: ("silu", _run_silu),
         torch.sign: ("sign", _run_sign),
         torch.ops.aten.sign.default: ("sign", _run_sign),
         torch.ops.aten.sign: ("sign", _run_sign),
@@ -890,6 +901,7 @@ def _compile_graph(
         "log10",
         "rsqrt",
         "sigmoid",
+        "silu",
         "sign",
         "round",
         "trunc",
