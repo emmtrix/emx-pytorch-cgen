@@ -1,0 +1,19 @@
+{{ signature }}
+    float acc = 0.0f;
+{% if rank == 0 %}
+    acc += {{ scalar_access }};
+{% elif flat %}
+    for (int64_t i = 0; i < {{ numel }}; ++i) {
+        acc += {{ flat_access }};
+    }
+{% else %}
+{% for dim in sizes %}
+    for (int64_t i{{ dim.dim }} = 0; i{{ dim.dim }} < {{ dim.size }}; ++i{{ dim.dim }}) {
+{% endfor %}
+        acc += {{ nested_access }};
+{% for dim in sizes | reverse %}
+    }
+{% endfor %}
+{% endif %}
+    out[0] = acc;
+}
