@@ -173,3 +173,14 @@ def test_emit_strided_access_expressions():
         _emit_strided_access("a", ("i", "t"), (5, 1), contig=True, sizes=(2, 3))
         == "a[i][t]"
     )
+
+
+def test_elementwise_kernel_source_matches_expected():
+    a = torch.randn(2, 3, dtype=torch.float32)
+    b = torch.randn(2, 3, dtype=torch.float32)
+    _assert_codegen_source_matches(
+        "atan_single.c", get_generic_source, atan_fn, (a,)
+    )
+    _assert_codegen_source_matches(
+        "add_single.c", get_generic_source, add_broadcast_fn, (a, b)
+    )
