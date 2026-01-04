@@ -1039,7 +1039,7 @@ lcm                                      -     -
 lcm_                                     -     -      
 ldexp                                    yes   yes    
 ldexp_                                   -     yes    
-le                                       -     -      
+le                                       -     yes    
 le_                                      -     -      
 leaky_relu                               -     -      
 leaky_relu_                              -     -      
