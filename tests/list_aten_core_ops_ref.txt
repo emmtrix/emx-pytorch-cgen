@@ -1125,8 +1125,8 @@ logical_and                              -     -
 logical_and_                             -     -      
 logical_not                              -     -      
 logical_not_                             -     -      
-logical_or                               -     -      
-logical_or_                              -     -      
+logical_or                               -     yes    
+logical_or_                              -     yes    
 logical_xor                              -     -      
 logical_xor_                             -     -      
 logit                                    yes   yes    
@@ -1718,8 +1718,8 @@ zfill                                    -     -
 Summary
 total aten ops: 1714
 supported by cref only: 8
-supported by codegen only: 96
+supported by codegen only: 103
 supported by both: 74
-unsupported by either: 1536
-supported by codegen: 170 / 1714 (9.9 %)
+unsupported by either: 1529
+supported by codegen: 177 / 1714 (10.3 %)
 supported by c-ref: 82 / 1714 (4.8 %)
