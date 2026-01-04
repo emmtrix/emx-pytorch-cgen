@@ -562,8 +562,8 @@ arctan2_                                 -     -
 arctan_                                  -     -      
 arctanh                                  -     -      
 arctanh_                                 -     -      
-argmax                                   -     -      
-argmin                                   -     -      
+argmax                                   -     yes    
+argmin                                   -     yes    
 argsort                                  -     -      
 argwhere                                 -     -      
 as_strided                               -     -      
@@ -1718,8 +1718,8 @@ zfill                                    -     -
 Summary
 total aten ops: 1714
 supported by cref only: 8
-supported by codegen only: 116
+supported by codegen only: 117
 supported by both: 74
-unsupported by either: 1516
-supported by codegen: 190 / 1714 (11.1 %)
+unsupported by either: 1515
+supported by codegen: 191 / 1714 (11.1 %)
 supported by c-ref: 82 / 1714 (4.8 %)
