@@ -52,6 +52,10 @@ _CODEGEN_DTYPES = {
     ),
 }
 
+_INTEGER_CODEGEN_DTYPES = {
+    torch.int32,
+}
+
 def _binary_spec(
     name: str,
     targets: Iterable[object],
@@ -1739,7 +1743,7 @@ def _write_reduction_kernel(
         reduction_count *= input_shape[dim]
     bool_reduction = config.get("bool_reduction", False)
     acc_type = "int32_t" if bool_reduction else dtype.c_type
-    if bool_reduction or dtype.torch_dtype is torch.int32:
+    if bool_reduction or dtype.torch_dtype in _INTEGER_CODEGEN_DTYPES:
         init_value = str(config["init_value"])
     else:
         init_value = f"{config['init_value']}.0f"
