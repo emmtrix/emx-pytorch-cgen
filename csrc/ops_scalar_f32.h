@@ -269,6 +269,10 @@ static inline float ref_scalar_f32_log10(float a) {
     return log10f(a);
 }
 
+static inline float ref_scalar_f32_isfinite(float a) {
+    return isfinite(a) ? 1.0f : 0.0f;
+}
+
 static inline float ref_scalar_f32_rsqrt(float a) {
     return 1.0f / sqrtf(a);
 }
