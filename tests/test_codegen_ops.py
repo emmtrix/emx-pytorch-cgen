@@ -224,6 +224,7 @@ CODEGEN_ATEN_OPS = [
     torch.ops.aten.hypot.default,
     torch.ops.aten.i0.default,
     torch.ops.aten.isfinite.default,
+    torch.ops.aten.isinf.default,
     torch.ops.aten.ldexp.Tensor,
     torch.ops.aten.lt.Tensor,
     torch.ops.aten.le.Tensor,
@@ -231,6 +232,7 @@ CODEGEN_ATEN_OPS = [
     torch.ops.aten.ge.Tensor,
     torch.ops.aten.eq.Tensor,
     torch.ops.aten.ne.Tensor,
+    torch.ops.aten.logical_or.default,
     torch.ops.aten.lgamma.default,
     torch.ops.aten.log.default,
     torch.ops.aten.log10.default,
@@ -288,6 +290,7 @@ INPLACE_ATEN_OPS = [
     torch.ops.aten.abs_.default,
     torch.ops.aten.acos_.default,
     torch.ops.aten.acosh_.default,
+    torch.ops.aten.arccosh_.default,
     torch.ops.aten.asin_.default,
     torch.ops.aten.asinh_.default,
     torch.ops.aten.atan_.default,
@@ -329,6 +332,7 @@ INPLACE_ATEN_OPS = [
     torch.ops.aten.log1p_.default,
     torch.ops.aten.log2_.default,
     torch.ops.aten.logit_.default,
+    torch.ops.aten.logical_or_.default,
     torch.ops.aten.mul_.Tensor,
     torch.ops.aten.nan_to_num_.default,
     torch.ops.aten.neg_.default,
@@ -421,6 +425,9 @@ CODEGEN_OP_TEST_CONFIG = {
     torch.ops.aten.bitwise_right_shift_.Tensor: {
         "allowed_dtypes": (torch.int8, torch.int32),
     },
+    torch.ops.aten.logical_or.default: {
+        "allowed_dtypes": (torch.float32, torch.int8, torch.int32),
+    },
     torch.ops.aten.where.self: {
         "requires_same_shape": False,
         "sample_filter": _broadcastable_sample_filter,
@@ -502,7 +509,7 @@ def _sanitize_inplace_inputs(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     name = aten_overload._schema.name.split("::")[-1]
     unit_range_ops = {"acos_", "asin_", "atanh_", "erfinv_"}
-    ge1_ops = {"acosh_"}
+    ge1_ops = {"acosh_", "arccosh_"}
     positive_ops = {"digamma_", "lgamma_", "log_", "log10_", "log2_", "rsqrt_", "sqrt_"}
     log1p_ops = {"log1p_"}
     logit_ops = {"logit_"}
@@ -585,6 +592,17 @@ class TestCodegenOpInfo(TestCase):
             torch.testing.assert_close(
                 result, expected, equal_nan=dtype in (torch.int8, torch.int32)
             )
+
+
+class TestCodegenAliasedOps(TestCase):
+    def test_codegen_arccosh_matches_eager(self):
+        aten_overload = torch.ops.aten.arccosh.default
+        compiled = _compile_codegen_op(aten_overload)
+        for dtype in (torch.float32,):
+            inputs = (torch.rand(2, 3, dtype=dtype) + 1.0,)
+            expected = aten_overload(*inputs)
+            result = compiled(*inputs)
+            torch.testing.assert_close(result, expected)
 
 
 class TestCodegenInplaceOps(TestCase):

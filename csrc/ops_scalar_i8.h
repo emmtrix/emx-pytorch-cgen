@@ -95,6 +95,10 @@ static inline int8_t ref_scalar_i8_ne(int8_t a, int8_t b) {
     return a != b ? (int8_t)1 : (int8_t)0;
 }
 
+static inline int8_t ref_scalar_i8_logical_or(int8_t a, int8_t b) {
+    return (a != 0 || b != 0) ? (int8_t)1 : (int8_t)0;
+}
+
 static inline int8_t ref_scalar_i8_fmax(int8_t a, int8_t b) {
     return a > b ? a : b;
 }
@@ -266,6 +270,7 @@ REF_I8_UNARY_FROM_F32(log1p)
 REF_I8_UNARY_FROM_F32(log2)
 REF_I8_UNARY_FROM_F32(isfinite)
 REF_I8_UNARY_FROM_F32(logit)
+REF_I8_UNARY_FROM_F32(isinf)
 REF_I8_UNARY_FROM_F32(nan_to_num)
 REF_I8_UNARY_FROM_F32(rad2deg)
 REF_I8_UNARY_FROM_F32(rsqrt)

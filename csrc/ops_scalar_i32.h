@@ -101,6 +101,10 @@ static inline int32_t ref_scalar_i32_ne(int32_t a, int32_t b) {
     return a != b ? 1 : 0;
 }
 
+static inline int32_t ref_scalar_i32_logical_or(int32_t a, int32_t b) {
+    return (a != 0 || b != 0) ? 1 : 0;
+}
+
 static inline int32_t ref_scalar_i32_fmax(int32_t a, int32_t b) {
     return a > b ? a : b;
 }
@@ -272,6 +276,7 @@ REF_I32_UNARY_FROM_F32(log1p)
 REF_I32_UNARY_FROM_F32(log2)
 REF_I32_UNARY_FROM_F32(isfinite)
 REF_I32_UNARY_FROM_F32(logit)
+REF_I32_UNARY_FROM_F32(isinf)
 REF_I32_UNARY_FROM_F32(nan_to_num)
 REF_I32_UNARY_FROM_F32(rad2deg)
 REF_I32_UNARY_FROM_F32(rsqrt)

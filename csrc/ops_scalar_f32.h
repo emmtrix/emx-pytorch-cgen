@@ -60,6 +60,10 @@ static inline float ref_scalar_f32_ne(float a, float b) {
     return a != b ? 1.0f : 0.0f;
 }
 
+static inline float ref_scalar_f32_logical_or(float a, float b) {
+    return (a != 0.0f || b != 0.0f) ? 1.0f : 0.0f;
+}
+
 static inline float ref_scalar_f32_fmax(float a, float b) {
     return fmaxf(a, b);
 }
@@ -432,6 +436,10 @@ static inline float ref_scalar_f32_logit(float a) {
         return NAN;
     }
     return logf(a / (1.0f - a));
+}
+
+static inline float ref_scalar_f32_isinf(float a) {
+    return isinf(a) ? 1.0f : 0.0f;
 }
 
 static inline float ref_scalar_f32_nan_to_num(float a) {

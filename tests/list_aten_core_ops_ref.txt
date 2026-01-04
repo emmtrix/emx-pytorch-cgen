@@ -551,7 +551,7 @@ arange                                   -     -
 arccos                                   -     -      
 arccos_                                  -     -      
 arccosh                                  -     -      
-arccosh_                                 -     -      
+arccosh_                                 -     yes    
 arcsin                                   -     -      
 arcsin_                                  -     -      
 arcsinh                                  -     -      
@@ -1013,7 +1013,7 @@ isdigit                                  -     -
 isfinite                                 -     yes    
 isidentifier                             -     -      
 isin                                     -     -      
-isinf                                    -     -      
+isinf                                    -     yes    
 islower                                  -     -      
 isnan                                    -     -      
 isneginf                                 -     -      
@@ -1125,8 +1125,8 @@ logical_and                              -     -
 logical_and_                             -     -      
 logical_not                              -     -      
 logical_not_                             -     -      
-logical_or                               -     -      
-logical_or_                              -     -      
+logical_or                               -     yes    
+logical_or_                              -     yes    
 logical_xor                              -     -      
 logical_xor_                             -     -      
 logit                                    yes   yes    

@@ -213,6 +213,21 @@ SUPPORTED_OPS = {
             torch.ops.aten.bitwise_xor_,
         ),
     ),
+    "logical_or": _binary_spec(
+        "logical_or",
+        (
+            torch.logical_or,
+            torch.ops.aten.logical_or.default,
+            torch.ops.aten.logical_or,
+            torch.ops.aten.logical_or_.default,
+            torch.ops.aten.logical_or_,
+        ),
+        None,
+        inplace_targets=(
+            torch.ops.aten.logical_or_.default,
+            torch.ops.aten.logical_or_,
+        ),
+    ),
     "bitwise_left_shift": _binary_spec(
         "bitwise_left_shift",
         (
@@ -713,14 +728,21 @@ SUPPORTED_OPS = {
         "acosh",
         (
             torch.acosh,
+            torch.arccosh,
             torch.ops.aten.acosh.default,
             torch.ops.aten.acosh,
             torch.ops.aten.acosh_.default,
             torch.ops.aten.acosh_,
+            torch.ops.aten.arccosh.default,
+            torch.ops.aten.arccosh,
+            torch.ops.aten.arccosh_.default,
+            torch.ops.aten.arccosh_,
         ),
         inplace_targets=(
             torch.ops.aten.acosh_.default,
             torch.ops.aten.acosh_,
+            torch.ops.aten.arccosh_.default,
+            torch.ops.aten.arccosh_,
         ),
     ),
     "asin": _unary_spec(
@@ -1193,6 +1215,14 @@ SUPPORTED_OPS = {
         inplace_targets=(
             torch.ops.aten.i0_.default,
             torch.ops.aten.i0_,
+        ),
+    ),
+    "isinf": _unary_spec(
+        "isinf",
+        (
+            torch.isinf,
+            torch.ops.aten.isinf.default,
+            torch.ops.aten.isinf,
         ),
     ),
     "lgamma": _unary_spec(
