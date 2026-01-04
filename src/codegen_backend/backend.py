@@ -1533,6 +1533,84 @@ def _write_elementwise_kernel(
     return lines
 
 
+def _matmul_shape_info(
+    op_spec: _OpSpec, a_shape: Sequence[int], b_shape: Sequence[int]
+) -> Tuple[Tuple[int, ...], int, int, int, bool, bool, Tuple[int, ...]]:
+    if not a_shape or not b_shape:
+        raise RefBackendError("codegen matmul requires at least 1D inputs")
+    a_is_1d = len(a_shape) == 1
+    b_is_1d = len(b_shape) == 1
+    if a_is_1d:
+        a_batch: Tuple[int, ...] = ()
+        m = 1
+        k = a_shape[0]
+    else:
+        a_batch = tuple(a_shape[:-2])
+        m = a_shape[-2]
+        k = a_shape[-1]
+    if b_is_1d:
+        b_batch: Tuple[int, ...] = ()
+        n = 1
+        k_b = b_shape[0]
+    else:
+        b_batch = tuple(b_shape[:-2])
+        k_b = b_shape[-2]
+        n = b_shape[-1]
+    if k != k_b:
+        raise RefBackendError("codegen matmul requires inner dimensions to match")
+    batch_shape = _broadcast_output_shape(op_spec, a_batch, b_batch)
+    if a_is_1d and b_is_1d:
+        output_shape: Tuple[int, ...] = ()
+    elif a_is_1d:
+        output_shape = (*batch_shape, n)
+    elif b_is_1d:
+        output_shape = (*batch_shape, m)
+    else:
+        output_shape = (*batch_shape, m, n)
+    return batch_shape, m, n, k, a_is_1d, b_is_1d, output_shape
+
+
+def _expand_matmul_input(
+    shape: Sequence[int],
+    strides: Sequence[int],
+    batch_shape: Sequence[int],
+    *,
+    is_left: bool,
+    is_1d: bool,
+) -> Tuple[Tuple[int, ...], Tuple[int, ...]]:
+    if is_1d:
+        if is_left:
+            matrix_shape = (1, shape[0])
+            matrix_strides = (0, strides[0])
+        else:
+            matrix_shape = (shape[0], 1)
+            matrix_strides = (strides[0], 0)
+        batch_dims: Tuple[int, ...] = ()
+        batch_strides: Tuple[int, ...] = ()
+    else:
+        batch_dims = tuple(shape[:-2])
+        batch_strides = tuple(strides[:-2])
+        matrix_shape = tuple(shape[-2:])
+        matrix_strides = tuple(strides[-2:])
+    if len(batch_dims) < len(batch_shape):
+        pad = (1,) * (len(batch_shape) - len(batch_dims))
+        batch_dims = pad + batch_dims
+        batch_strides = (0,) * len(pad) + batch_strides
+    expanded_batch_strides: List[int] = []
+    for size, target, stride in zip(batch_dims, batch_shape, batch_strides):
+        if size == target:
+            expanded_batch_strides.append(stride)
+        elif size == 1:
+            expanded_batch_strides.append(0)
+        else:
+            raise RefBackendError(
+                "codegen matmul requires batch dimensions to be broadcastable"
+            )
+    expanded_shape = tuple(batch_shape) + tuple(matrix_shape)
+    expanded_strides = tuple(expanded_batch_strides) + tuple(matrix_strides)
+    return expanded_shape, expanded_strides
+
+
 def _write_matmul_kernel(
     node_index: int,
     op_spec: _OpSpec,
@@ -1547,76 +1625,94 @@ def _write_matmul_kernel(
     b_is_contiguous = _is_contiguous(b_shape, b_strides)
 
     if op_spec.name == "matmul":
-        if len(a_shape) == 1:
-            k = a_shape[0]
-            a_suffix = _format_array_suffix((k,))
-            b_suffix = _format_array_suffix((k,))
-            out_suffix = _format_array_suffix(())
-            rendered = matmul_template.render(
-                signature=(
-                    f"void node{node_index}_{op_spec.name}_{dtype.suffix}("
-                    f"const {dtype.c_type} a{a_suffix}, "
-                    f"const {dtype.c_type} b{b_suffix}, "
-                    f"{dtype.c_type} out{out_suffix}) {{"
-                ),
-                batch=None,
-                m=1,
-                n=1,
-                k=k,
-                a_access=_emit_strided_access(
-                    "a",
-                    ("t",),
-                    a_strides,
-                    a_is_contiguous,
-                    sizes=a_shape,
-                    c_type=dtype.c_type,
-                ),
-                b_access=_emit_strided_access(
-                    "b",
-                    ("t",),
-                    b_strides,
-                    b_is_contiguous,
-                    sizes=b_shape,
-                    c_type=dtype.c_type,
-                ),
-                out_access="out[0]",
-            )
-            return rendered.strip().splitlines()
-        m, k = a_shape
-        _, n = b_shape
-        a_suffix = _format_array_suffix((m, k))
-        b_suffix = _format_array_suffix((k, n))
-        out_suffix = _format_array_suffix((m, n))
-        rendered = matmul_template.render(
-            signature=(
-                f"void node{node_index}_{op_spec.name}_{dtype.suffix}("
-                f"const {dtype.c_type} a{a_suffix}, "
-                f"const {dtype.c_type} b{b_suffix}, "
-                f"{dtype.c_type} out{out_suffix}) {{"
-            ),
-            batch=None,
-            m=m,
-            n=n,
-            k=k,
-            a_access=_emit_strided_access(
-                "a",
-                ("i", "t"),
-                a_strides,
-                a_is_contiguous,
-                sizes=a_shape,
-                c_type=dtype.c_type,
-            ),
-            b_access=_emit_strided_access(
-                "b",
-                ("t", "j"),
-                b_strides,
-                b_is_contiguous,
-                sizes=b_shape,
-                c_type=dtype.c_type,
-            ),
-            out_access="out[i][j]",
+        batch_shape, m, n, k, a_is_1d, b_is_1d, output_shape = _matmul_shape_info(
+            op_spec, a_shape, b_shape
         )
-        return rendered.strip().splitlines()
+        a_exp_shape, a_exp_strides = _expand_matmul_input(
+            a_shape,
+            a_strides,
+            batch_shape,
+            is_left=True,
+            is_1d=a_is_1d,
+        )
+        b_exp_shape, b_exp_strides = _expand_matmul_input(
+            b_shape,
+            b_strides,
+            batch_shape,
+            is_left=False,
+            is_1d=b_is_1d,
+        )
+        a_suffix = _format_array_suffix(a_shape)
+        b_suffix = _format_array_suffix(b_shape)
+        out_suffix = _format_array_suffix(output_shape)
+        signature = (
+            f"void node{node_index}_{op_spec.name}_{dtype.suffix}("
+            f"const {dtype.c_type} a{a_suffix}, "
+            f"const {dtype.c_type} b{b_suffix}, "
+            f"{dtype.c_type} out{out_suffix}) {{"
+        )
+        batch_indices = [f"b{dim}" for dim in range(len(batch_shape))]
+        output_indices = list(batch_indices)
+        if a_is_1d and b_is_1d:
+            pass
+        elif a_is_1d:
+            output_indices.append("j")
+        elif b_is_1d:
+            output_indices.append("i")
+        else:
+            output_indices.extend(["i", "j"])
+        output_strides = _contiguous_strides(output_shape)
+        out_access = _emit_strided_access(
+            "out",
+            output_indices,
+            output_strides,
+            contig=False,
+            sizes=output_shape,
+            c_type=dtype.c_type,
+        )
+        a_use_contig = a_is_contiguous and a_exp_shape == tuple(a_shape)
+        b_use_contig = b_is_contiguous and b_exp_shape == tuple(b_shape)
+        a_access = _emit_strided_access(
+            "a",
+            [*batch_indices, "i", "t"],
+            a_exp_strides,
+            contig=a_use_contig,
+            sizes=a_exp_shape,
+            c_type=dtype.c_type,
+        )
+        b_access = _emit_strided_access(
+            "b",
+            [*batch_indices, "t", "j"],
+            b_exp_strides,
+            contig=b_use_contig,
+            sizes=b_exp_shape,
+            c_type=dtype.c_type,
+        )
+        lines = [signature]
+        indent = "    "
+        for dim, size in enumerate(batch_shape):
+            lines.append(
+                f"{indent}for (int64_t b{dim} = 0; b{dim} < {size}; ++b{dim}) {{"
+            )
+            indent += "    "
+        lines.append(f"{indent}for (int64_t i = 0; i < {m}; ++i) {{")
+        indent += "    "
+        lines.append(f"{indent}for (int64_t j = 0; j < {n}; ++j) {{")
+        indent += "    "
+        lines.append(f"{indent}float acc = 0.0f;")
+        lines.append(f"{indent}for (int64_t t = 0; t < {k}; ++t) {{")
+        lines.append(f"{indent}    acc += {a_access} * {b_access};")
+        lines.append(f"{indent}}}")
+        lines.append(f"{indent}{out_access} = acc;")
+        indent = indent[:-4]
+        lines.append(f"{indent}}}")
+        indent = indent[:-4]
+        lines.append(f"{indent}}}")
+        for _ in range(len(batch_shape)):
+            indent = indent[:-4]
+            lines.append(f"{indent}}}")
+        lines.append("}")
+        return lines
     batch, m, k = a_shape
     _, _, n = b_shape
     a_suffix = _format_array_suffix((batch, m, k))
@@ -1901,17 +1997,10 @@ def _infer_output_shape(
         return ()
     a_shape, b_shape = input_shapes
     if op_spec.name == "matmul":
-        if len(a_shape) == 1 and len(b_shape) == 1:
-            if a_shape[0] != b_shape[0]:
-                raise RefBackendError(
-                    "codegen matmul requires inner dimensions to match"
-                )
-            return ()
-        if len(a_shape) != 2 or len(b_shape) != 2:
-            raise RefBackendError("codegen matmul requires 1D or 2D inputs")
-        if a_shape[1] != b_shape[0]:
-            raise RefBackendError("codegen matmul requires inner dimensions to match")
-        return (a_shape[0], b_shape[1])
+        _, _, _, _, _, _, output_shape = _matmul_shape_info(
+            op_spec, a_shape, b_shape
+        )
+        return output_shape
     if len(a_shape) != 3 or len(b_shape) != 3:
         raise RefBackendError("codegen bmm requires 3D inputs")
     if a_shape[0] != b_shape[0]:
