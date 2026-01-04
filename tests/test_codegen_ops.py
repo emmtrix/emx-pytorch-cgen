@@ -184,6 +184,8 @@ CODEGEN_ATEN_OPS = [
     torch.ops.aten.all.default,
     torch.ops.aten.angle.default,
     torch.ops.aten.any.default,
+    torch.ops.aten.argmax.default,
+    torch.ops.aten.argmin.default,
     torch.ops.aten.asin.default,
     torch.ops.aten.asinh.default,
     torch.ops.aten.atan.default,
@@ -449,6 +451,14 @@ CODEGEN_OP_TEST_CONFIG = {
     torch.ops.aten.where.self: {
         "requires_same_shape": False,
         "sample_filter": _broadcastable_sample_filter,
+    },
+    torch.ops.aten.argmax.default: {
+        "allow_non_tensor_args": True,
+        "allowed_dtypes": (torch.float32, torch.int8, torch.int32),
+    },
+    torch.ops.aten.argmin.default: {
+        "allow_non_tensor_args": True,
+        "allowed_dtypes": (torch.float32, torch.int8, torch.int32),
     },
     torch.ops.aten.matmul.default: {
         "allow_noncontiguous": True,
