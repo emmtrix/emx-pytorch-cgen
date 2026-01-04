@@ -29,8 +29,10 @@ def _matmul_sample_filter(sample):
     if len(tensors) != 2:
         return False
     a, b = tensors
-    if a.ndim != b.ndim or a.ndim not in (2, 3):
+    if a.ndim != b.ndim or a.ndim not in (1, 2, 3):
         return False
+    if a.ndim == 1:
+        return a.shape[0] == b.shape[0]
     if a.ndim == 2:
         return a.shape[1] == b.shape[0]
     return a.shape[0] == b.shape[0] and a.shape[2] == b.shape[1]

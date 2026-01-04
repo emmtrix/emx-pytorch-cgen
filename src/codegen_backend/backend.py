@@ -1506,6 +1506,41 @@ def _write_matmul_kernel(
     b_is_contiguous = _is_contiguous(b_shape, b_strides)
 
     if op_spec.name == "matmul":
+        if len(a_shape) == 1:
+            k = a_shape[0]
+            a_suffix = _format_array_suffix((k,))
+            b_suffix = _format_array_suffix((k,))
+            out_suffix = _format_array_suffix(())
+            rendered = matmul_template.render(
+                signature=(
+                    f"void node{node_index}_{op_spec.name}_{dtype.suffix}("
+                    f"const {dtype.c_type} a{a_suffix}, "
+                    f"const {dtype.c_type} b{b_suffix}, "
+                    f"{dtype.c_type} out{out_suffix}) {{"
+                ),
+                batch=None,
+                m=1,
+                n=1,
+                k=k,
+                a_access=_emit_strided_access(
+                    "a",
+                    ("t",),
+                    a_strides,
+                    a_is_contiguous,
+                    sizes=a_shape,
+                    c_type=dtype.c_type,
+                ),
+                b_access=_emit_strided_access(
+                    "b",
+                    ("t",),
+                    b_strides,
+                    b_is_contiguous,
+                    sizes=b_shape,
+                    c_type=dtype.c_type,
+                ),
+                out_access="out[0]",
+            )
+            return rendered.strip().splitlines()
         m, k = a_shape
         _, n = b_shape
         a_suffix = _format_array_suffix((m, k))
@@ -1811,8 +1846,14 @@ def _infer_output_shape(
         return ()
     a_shape, b_shape = input_shapes
     if op_spec.name == "matmul":
+        if len(a_shape) == 1 and len(b_shape) == 1:
+            if a_shape[0] != b_shape[0]:
+                raise RefBackendError(
+                    "codegen matmul requires inner dimensions to match"
+                )
+            return ()
         if len(a_shape) != 2 or len(b_shape) != 2:
-            raise RefBackendError("codegen matmul requires 2D inputs")
+            raise RefBackendError("codegen matmul requires 1D or 2D inputs")
         if a_shape[1] != b_shape[0]:
             raise RefBackendError("codegen matmul requires inner dimensions to match")
         return (a_shape[0], b_shape[1])
