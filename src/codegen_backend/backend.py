@@ -26,6 +26,33 @@ class _OpSpec:
     inplace_arg_index: int | None = None
 
 
+@dataclass(frozen=True)
+class _CodegenDType:
+    torch_dtype: torch.dtype
+    c_type: str
+    scalar_header: str
+    scalar_prefix: str
+    suffix: str
+
+
+_CODEGEN_DTYPES = {
+    torch.float32: _CodegenDType(
+        torch_dtype=torch.float32,
+        c_type="float",
+        scalar_header="ops_scalar_f32.h",
+        scalar_prefix="ref_scalar_f32_",
+        suffix="f32",
+    ),
+    torch.int32: _CodegenDType(
+        torch_dtype=torch.int32,
+        c_type="int32_t",
+        scalar_header="ops_scalar_i32.h",
+        scalar_prefix="ref_scalar_i32_",
+        suffix="i32",
+    ),
+}
+
+
 def _binary_spec(
     name: str,
     targets: Iterable[object],
@@ -1163,6 +1190,7 @@ class _GenericGraph:
     output_structure: object
     shapes: Dict[torch.fx.Node, Tuple[int, ...]]
     strides: Dict[torch.fx.Node, Tuple[int, ...]]
+    dtype: _CodegenDType
 
 
 @dataclass
@@ -1172,9 +1200,10 @@ class _GenericLibrary:
     input_shapes: Tuple[Tuple[int, ...], ...]
     input_strides: Tuple[Tuple[int, ...], ...]
     output_shape: Tuple[int, ...]
+    dtype: _CodegenDType
 
     def run(self, inputs: Sequence[torch.Tensor], out: torch.Tensor) -> None:
-        fn = getattr(self.lib, "ref_codegen_main_f32")
+        fn = getattr(self.lib, f"ref_codegen_main_{self.dtype.suffix}")
         args = [tensor.data_ptr() for tensor in inputs]
         args.append(out.data_ptr())
         fn(*args)
@@ -1247,6 +1276,8 @@ def _emit_strided_access(
     strides: Sequence[int],
     contig: bool,
     sizes: Optional[Sequence[int]] = None,
+    *,
+    c_type: str = "float",
 ) -> str:
     if contig:
         return f"{name}{''.join(f'[{idx}]' for idx in indices)}"
@@ -1258,7 +1289,7 @@ def _emit_strided_access(
             continue
         terms.append(f"{idx_name} * {stride}")
     index_expr = " + ".join(terms) if terms else "0"
-    return f"((float*){name})[{index_expr}]"
+    return f"(({c_type}*){name})[{index_expr}]"
 
 
 def _format_strided_access(
@@ -1266,11 +1297,13 @@ def _format_strided_access(
     input_shape: Sequence[int],
     input_strides: Sequence[int],
     output_shape: Sequence[int],
+    *,
+    c_type: str = "float",
 ) -> str:
     output_rank = len(output_shape)
     input_rank = len(input_shape)
     if input_rank == 0:
-        return f"((float*){name})[0]"
+        return f"(({c_type}*){name})[0]"
     offset = output_rank - input_rank
     indices = [f"i{input_dim + offset}" for input_dim in range(input_rank)]
     return _emit_strided_access(
@@ -1279,6 +1312,7 @@ def _format_strided_access(
         input_strides,
         contig=False,
         sizes=input_shape,
+        c_type=c_type,
     )
 
 
@@ -1286,16 +1320,18 @@ def _format_output_access(
     name: str,
     output_shape: Sequence[int],
     output_strides: Sequence[int],
+    *,
+    c_type: str = "float",
 ) -> str:
     if not output_shape:
-        return f"((float*){name})[0]"
+        return f"(({c_type}*){name})[0]"
     terms = []
     for dim, stride in enumerate(output_strides):
         if output_shape[dim] == 1:
             continue
         terms.append(f"i{dim} * {stride}")
     index_expr = " + ".join(terms) if terms else "0"
-    return f"((float*){name})[{index_expr}]"
+    return f"(({c_type}*){name})[{index_expr}]"
 
 
 def emit_signature(
@@ -1303,6 +1339,7 @@ def emit_signature(
     op_spec: _OpSpec,
     output_shape: Sequence[int],
     input_shapes: Sequence[Sequence[int]],
+    dtype: _CodegenDType,
 ) -> str:
     out_suffix = _format_array_suffix(output_shape)
     if op_spec.kind == "binary":
@@ -1310,13 +1347,16 @@ def emit_signature(
         a_suffix = _format_array_suffix(a_shape)
         b_suffix = _format_array_suffix(b_shape)
         return (
-            f"void node{node_index}_{op_spec.name}_f32(const float a{a_suffix}, "
-            f"const float b{b_suffix}, float out{out_suffix}) {{"
+            f"void node{node_index}_{op_spec.name}_{dtype.suffix}("
+            f"const {dtype.c_type} a{a_suffix}, "
+            f"const {dtype.c_type} b{b_suffix}, "
+            f"{dtype.c_type} out{out_suffix}) {{"
         )
     a_suffix = _format_array_suffix(input_shapes[0])
     return (
-        f"void node{node_index}_{op_spec.name}_f32(const float a{a_suffix}, "
-        f"float out{out_suffix}) {{"
+        f"void node{node_index}_{op_spec.name}_{dtype.suffix}("
+        f"const {dtype.c_type} a{a_suffix}, "
+        f"{dtype.c_type} out{out_suffix}) {{"
     )
 
 
@@ -1333,7 +1373,10 @@ def emit_loops(output_shape: Sequence[int]) -> Tuple[List[str], str]:
 
 
 def emit_output_access(
-    output_shape: Sequence[int], output_strides: Sequence[int]
+    output_shape: Sequence[int],
+    output_strides: Sequence[int],
+    *,
+    c_type: str,
 ) -> str:
     output_is_contiguous = _is_contiguous(output_shape, output_strides)
     if output_is_contiguous:
@@ -1341,7 +1384,7 @@ def emit_output_access(
             "".join(f"[i{dim}]" for dim in range(len(output_shape))) or "[0]"
         )
         return f"out{output_access}"
-    return _format_output_access("out", output_shape, output_strides)
+    return _format_output_access("out", output_shape, output_strides, c_type=c_type)
 
 
 def emit_input_access(
@@ -1351,6 +1394,7 @@ def emit_input_access(
     output_shape: Sequence[int],
     *,
     broadcast_contiguous: bool,
+    c_type: str,
 ) -> str:
     if _is_contiguous(input_shape, input_strides):
         if broadcast_contiguous:
@@ -1358,7 +1402,9 @@ def emit_input_access(
         return (
             f"{name}{''.join(f'[i{dim}]' for dim in range(len(output_shape))) or '[0]'}"
         )
-    return _format_strided_access(name, input_shape, input_strides, output_shape)
+    return _format_strided_access(
+        name, input_shape, input_strides, output_shape, c_type=c_type
+    )
 
 
 def emit_body(
@@ -1368,16 +1414,27 @@ def emit_body(
     input_strides: Sequence[Sequence[int]],
     output_shape: Sequence[int],
     indent: str,
+    dtype: _CodegenDType,
 ) -> List[str]:
-    scalar_fn = f"ref_scalar_f32_{op_spec.name}"
+    scalar_fn = f"{dtype.scalar_prefix}{op_spec.name}"
     if op_spec.kind == "binary":
         a_shape, b_shape = input_shapes
         a_strides, b_strides = input_strides
         a_index_expr = emit_input_access(
-            "a", a_shape, a_strides, output_shape, broadcast_contiguous=True
+            "a",
+            a_shape,
+            a_strides,
+            output_shape,
+            broadcast_contiguous=True,
+            c_type=dtype.c_type,
         )
         b_index_expr = emit_input_access(
-            "b", b_shape, b_strides, output_shape, broadcast_contiguous=True
+            "b",
+            b_shape,
+            b_strides,
+            output_shape,
+            broadcast_contiguous=True,
+            c_type=dtype.c_type,
         )
         return [
             f"{indent}{output_access} = {scalar_fn}({a_index_expr}, {b_index_expr});"
@@ -1385,7 +1442,12 @@ def emit_body(
     a_shape = input_shapes[0]
     a_strides = input_strides[0]
     input_access = emit_input_access(
-        "a", a_shape, a_strides, output_shape, broadcast_contiguous=False
+        "a",
+        a_shape,
+        a_strides,
+        output_shape,
+        broadcast_contiguous=False,
+        c_type=dtype.c_type,
     )
     return [f"{indent}{output_access} = {scalar_fn}({input_access});"]
 
@@ -1407,11 +1469,14 @@ def _write_elementwise_kernel(
     input_shapes: Sequence[Sequence[int]],
     input_strides: Sequence[Sequence[int]],
     output_strides: Sequence[int],
+    dtype: _CodegenDType,
 ) -> List[str]:
-    lines = [emit_signature(node_index, op_spec, output_shape, input_shapes)]
+    lines = [emit_signature(node_index, op_spec, output_shape, input_shapes, dtype)]
     loop_lines, indent = emit_loops(output_shape)
     lines.extend(loop_lines)
-    output_access = emit_output_access(output_shape, output_strides)
+    output_access = emit_output_access(
+        output_shape, output_strides, c_type=dtype.c_type
+    )
     lines.extend(
         emit_body(
             op_spec,
@@ -1420,6 +1485,7 @@ def _write_elementwise_kernel(
             input_strides,
             output_shape,
             indent,
+            dtype,
         )
     )
     lines.extend(emit_footer(output_shape, indent))
@@ -1433,6 +1499,7 @@ def _write_matmul_kernel(
     b_shape: Sequence[int],
     a_strides: Sequence[int],
     b_strides: Sequence[int],
+    dtype: _CodegenDType,
 ) -> List[str]:
     matmul_template = _get_template_env().get_template("matmul_kernel.c.j2")
     a_is_contiguous = _is_contiguous(a_shape, a_strides)
@@ -1446,18 +1513,30 @@ def _write_matmul_kernel(
         out_suffix = _format_array_suffix((m, n))
         rendered = matmul_template.render(
             signature=(
-                f"void node{node_index}_{op_spec.name}_f32(const float a{a_suffix}, "
-                f"const float b{b_suffix}, float out{out_suffix}) {{"
+                f"void node{node_index}_{op_spec.name}_{dtype.suffix}("
+                f"const {dtype.c_type} a{a_suffix}, "
+                f"const {dtype.c_type} b{b_suffix}, "
+                f"{dtype.c_type} out{out_suffix}) {{"
             ),
             batch=None,
             m=m,
             n=n,
             k=k,
             a_access=_emit_strided_access(
-                "a", ("i", "t"), a_strides, a_is_contiguous, sizes=a_shape
+                "a",
+                ("i", "t"),
+                a_strides,
+                a_is_contiguous,
+                sizes=a_shape,
+                c_type=dtype.c_type,
             ),
             b_access=_emit_strided_access(
-                "b", ("t", "j"), b_strides, b_is_contiguous, sizes=b_shape
+                "b",
+                ("t", "j"),
+                b_strides,
+                b_is_contiguous,
+                sizes=b_shape,
+                c_type=dtype.c_type,
             ),
             out_access="out[i][j]",
         )
@@ -1469,18 +1548,30 @@ def _write_matmul_kernel(
     out_suffix = _format_array_suffix((batch, m, n))
     rendered = matmul_template.render(
         signature=(
-            f"void node{node_index}_{op_spec.name}_f32(const float a{a_suffix}, "
-            f"const float b{b_suffix}, float out{out_suffix}) {{"
+            f"void node{node_index}_{op_spec.name}_{dtype.suffix}("
+            f"const {dtype.c_type} a{a_suffix}, "
+            f"const {dtype.c_type} b{b_suffix}, "
+            f"{dtype.c_type} out{out_suffix}) {{"
         ),
         batch=batch,
         m=m,
         n=n,
         k=k,
         a_access=_emit_strided_access(
-            "a", ("b_idx", "i", "t"), a_strides, a_is_contiguous, sizes=a_shape
+            "a",
+            ("b_idx", "i", "t"),
+            a_strides,
+            a_is_contiguous,
+            sizes=a_shape,
+            c_type=dtype.c_type,
         ),
         b_access=_emit_strided_access(
-            "b", ("b_idx", "t", "j"), b_strides, b_is_contiguous, sizes=b_shape
+            "b",
+            ("b_idx", "t", "j"),
+            b_strides,
+            b_is_contiguous,
+            sizes=b_shape,
+            c_type=dtype.c_type,
         ),
         out_access="out[b_idx][i][j]",
     )
@@ -1508,6 +1599,7 @@ def _write_reduction_kernel(
     output_strides: Sequence[int],
     reduction_dims: Tuple[int, ...],
     keepdim: bool,
+    dtype: _CodegenDType,
 ) -> List[str]:
     reduction_template = _get_template_env().get_template("sum_kernel.c.j2")
     config = _REDUCTION_CONFIG[op_spec.name]
@@ -1516,11 +1608,13 @@ def _write_reduction_kernel(
     output_rank = len(output_shape)
     reduction_set = set(reduction_dims)
     signature = (
-        f"void node{node_index}_{op_spec.name}_f32("
-        f"const float a{_format_array_suffix(input_shape)}, "
-        f"float out{_format_array_suffix(output_shape)}) {{"
+        f"void node{node_index}_{op_spec.name}_{dtype.suffix}("
+        f"const {dtype.c_type} a{_format_array_suffix(input_shape)}, "
+        f"{dtype.c_type} out{_format_array_suffix(output_shape)}) {{"
     )
-    output_access = emit_output_access(output_shape, output_strides)
+    output_access = emit_output_access(
+        output_shape, output_strides, c_type=dtype.c_type
+    )
     if input_rank == 0:
         input_access = "a[0]"
     else:
@@ -1547,6 +1641,7 @@ def _write_reduction_kernel(
             input_strides,
             contig=a_is_contiguous,
             sizes=input_shape,
+            c_type=dtype.c_type,
         )
     rendered = reduction_template.render(
         signature=signature,
@@ -1571,7 +1666,7 @@ def _write_generic_source(graph: _GenericGraph) -> str:
     op_nodes = graph.op_nodes
     headers = [
         "#include <stdint.h>",
-        "#include \"ops_scalar_f32.h\"",
+        f"#include \"{graph.dtype.scalar_header}\"",
     ]
     kernels: List[str] = []
     for index, op_node in enumerate(op_nodes, start=1):
@@ -1586,6 +1681,7 @@ def _write_generic_source(graph: _GenericGraph) -> str:
                 input_shapes,
                 input_strides,
                 output_strides,
+                graph.dtype,
             )
         elif op_node.spec.kind == "reduction":
             input_node = op_node.inputs[0]
@@ -1598,6 +1694,7 @@ def _write_generic_source(graph: _GenericGraph) -> str:
                 graph.strides[op_node.node],
                 op_node.reduction_dims or (),
                 op_node.keepdim,
+                graph.dtype,
             )
         else:
             lhs, rhs = op_node.inputs
@@ -1606,19 +1703,25 @@ def _write_generic_source(graph: _GenericGraph) -> str:
             lhs_strides = graph.strides[lhs]
             rhs_strides = graph.strides[rhs]
             kernel_lines = _write_matmul_kernel(
-                index, op_node.spec, lhs_shape, rhs_shape, lhs_strides, rhs_strides
+                index,
+                op_node.spec,
+                lhs_shape,
+                rhs_shape,
+                lhs_strides,
+                rhs_strides,
+                graph.dtype,
             )
         kernels.append("\n".join(kernel_lines))
     input_args = ", ".join(
         [
-            f"const float input_{idx}{_format_array_suffix(graph.shapes[node])}"
+            f"const {graph.dtype.c_type} input_{idx}{_format_array_suffix(graph.shapes[node])}"
             for idx, node in enumerate(placeholders)
         ]
     )
     input_args = f"{input_args}, " if input_args else ""
     signature = (
-        "void ref_codegen_main_f32("
-        f"{input_args}float out{_format_array_suffix(graph.shapes[graph.output_value])}) {{"
+        f"void ref_codegen_main_{graph.dtype.suffix}("
+        f"{input_args}{graph.dtype.c_type} out{_format_array_suffix(graph.shapes[graph.output_value])}) {{"
     )
     name_map: Dict[torch.fx.Node, str] = {}
     for idx, placeholder in enumerate(placeholders):
@@ -1639,14 +1742,16 @@ def _write_generic_source(graph: _GenericGraph) -> str:
         temp_index += 1
         name_map[op_node.node] = temp_name
         temp_decls.append(
-            f"float {temp_name}{_format_array_suffix(op_node.output_shape)};"
+            f"{graph.dtype.c_type} {temp_name}{_format_array_suffix(op_node.output_shape)};"
         )
     call_lines: List[str] = []
     for index, op_node in enumerate(op_nodes, start=1):
         input_names = [name_map[arg] for arg in op_node.inputs]
         output_name = name_map[op_node.node]
         args = ", ".join([*input_names, output_name])
-        call_lines.append(f"node{index}_{op_node.spec.name}_f32({args});")
+        call_lines.append(
+            f"node{index}_{op_node.spec.name}_{graph.dtype.suffix}({args});"
+        )
     template = _get_template_env().get_template("generic_source.c.j2")
     return (
         template.render(
@@ -1660,15 +1765,26 @@ def _write_generic_source(graph: _GenericGraph) -> str:
     )
 
 
-def _validate_example_inputs(example_inputs: Sequence[torch.Tensor]) -> None:
-    tensor_examples = [example for example in example_inputs if isinstance(example, torch.Tensor)]
+def _validate_example_inputs(
+    example_inputs: Sequence[torch.Tensor],
+) -> _CodegenDType:
+    tensor_examples = [
+        example for example in example_inputs if isinstance(example, torch.Tensor)
+    ]
     if not tensor_examples:
         raise RefBackendError("codegen backend requires at least one example tensor input")
+    first_dtype = tensor_examples[0].dtype
+    dtype_info = _CODEGEN_DTYPES.get(first_dtype)
+    if dtype_info is None:
+        raise RefBackendError(
+            "codegen backend supports only torch.float32 or torch.int32 tensors"
+        )
     for example in tensor_examples:
-        if example.dtype is not torch.float32:
-            raise RefBackendError("codegen backend supports only torch.float32 tensors")
+        if example.dtype is not first_dtype:
+            raise RefBackendError("codegen backend expects all tensors to share a dtype")
         if example.device.type != "cpu":
             raise RefBackendError("codegen backend supports only CPU tensors")
+    return dtype_info
 
 
 def _unwrap_output_node(output_node: torch.fx.Node) -> Tuple[torch.fx.Node, object]:
@@ -1822,7 +1938,7 @@ def _parse_reduction_args(
 def _analyze_generic_graph(
     gm: torch.fx.GraphModule, example_inputs: Sequence[torch.Tensor]
 ) -> _GenericGraph:
-    _validate_example_inputs(example_inputs)
+    dtype_info = _validate_example_inputs(example_inputs)
     output_node = None
     placeholders: List[torch.fx.Node] = []
     tensor_placeholders: List[torch.fx.Node] = []
@@ -1958,6 +2074,17 @@ def _analyze_generic_graph(
                 output_inplace_input = candidate
             break
 
+    if dtype_info.torch_dtype is torch.int32:
+        unsupported = {
+            op_node.spec.name
+            for op_node in op_nodes
+            if op_node.spec.name != "mul"
+        }
+        if unsupported:
+            raise RefBackendError(
+                "codegen backend supports torch.int32 only for mul graphs"
+            )
+
     return _GenericGraph(
         placeholders=placeholders,
         tensor_placeholders=tensor_placeholders,
@@ -1968,6 +2095,7 @@ def _analyze_generic_graph(
         output_structure=output_structure,
         shapes=shapes,
         strides=strides,
+        dtype=dtype_info,
     )
 
 
@@ -2001,8 +2129,9 @@ def _compile_generic_library(graph: _GenericGraph) -> _GenericLibrary:
     lib = ctypes.CDLL(str(so_path))
     argtypes = [ctypes.c_void_p for _ in graph.tensor_placeholders]
     argtypes.append(ctypes.c_void_p)
-    lib.ref_codegen_main_f32.argtypes = argtypes
-    lib.ref_codegen_main_f32.restype = None
+    entry_name = f"ref_codegen_main_{graph.dtype.suffix}"
+    getattr(lib, entry_name).argtypes = argtypes
+    getattr(lib, entry_name).restype = None
 
     input_shapes = tuple(graph.shapes[node] for node in graph.tensor_placeholders)
     input_strides = tuple(graph.strides[node] for node in graph.tensor_placeholders)
@@ -2012,15 +2141,20 @@ def _compile_generic_library(graph: _GenericGraph) -> _GenericLibrary:
         input_shapes=input_shapes,
         input_strides=input_strides,
         output_shape=graph.shapes[graph.output_value],
+        dtype=graph.dtype,
     )
     _LIBRARY_CACHE[digest] = compiled
     return compiled
 
 
-def _validate_runtime_inputs(inputs: Iterable[torch.Tensor]) -> None:
+def _validate_runtime_inputs(
+    inputs: Iterable[torch.Tensor], dtype: _CodegenDType
+) -> None:
     for tensor in inputs:
-        if tensor.dtype is not torch.float32:
-            raise RefBackendError("codegen backend supports only torch.float32 tensors")
+        if tensor.dtype is not dtype.torch_dtype:
+            raise RefBackendError(
+                f"codegen backend supports only {dtype.torch_dtype} tensors"
+            )
         if tensor.device.type != "cpu":
             raise RefBackendError("codegen backend supports only CPU tensors")
 
@@ -2067,7 +2201,8 @@ def _compile_graph(
                 if not isinstance(value, torch.Tensor):
                     raise RefBackendError("codegen backend expects tensor inputs only")
                 input_tensors.append(value)
-        _validate_runtime_inputs(input_tensors)
+        _validate_runtime_inputs(input_tensors, graph.dtype)
+
         input_shapes = tuple(tuple(tensor.shape) for tensor in input_tensors)
         input_strides = tuple(tuple(tensor.stride()) for tensor in input_tensors)
         cache_key = (input_shapes, input_strides)
