@@ -551,7 +551,7 @@ arange                                   -     -
 arccos                                   -     -      
 arccos_                                  -     -      
 arccosh                                  -     -      
-arccosh_                                 -     -      
+arccosh_                                 -     yes    
 arcsin                                   -     -      
 arcsin_                                  -     -      
 arcsinh                                  -     -      
@@ -1013,7 +1013,7 @@ isdigit                                  -     -
 isfinite                                 -     -      
 isidentifier                             -     -      
 isin                                     -     -      
-isinf                                    -     -      
+isinf                                    -     yes    
 islower                                  -     -      
 isnan                                    -     -      
 isneginf                                 -     -      

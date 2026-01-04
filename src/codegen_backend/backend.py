@@ -728,14 +728,21 @@ SUPPORTED_OPS = {
         "acosh",
         (
             torch.acosh,
+            torch.arccosh,
             torch.ops.aten.acosh.default,
             torch.ops.aten.acosh,
             torch.ops.aten.acosh_.default,
             torch.ops.aten.acosh_,
+            torch.ops.aten.arccosh.default,
+            torch.ops.aten.arccosh,
+            torch.ops.aten.arccosh_.default,
+            torch.ops.aten.arccosh_,
         ),
         inplace_targets=(
             torch.ops.aten.acosh_.default,
             torch.ops.aten.acosh_,
+            torch.ops.aten.arccosh_.default,
+            torch.ops.aten.arccosh_,
         ),
     ),
     "asin": _unary_spec(
@@ -1208,6 +1215,14 @@ SUPPORTED_OPS = {
         inplace_targets=(
             torch.ops.aten.i0_.default,
             torch.ops.aten.i0_,
+        ),
+    ),
+    "isinf": _unary_spec(
+        "isinf",
+        (
+            torch.isinf,
+            torch.ops.aten.isinf.default,
+            torch.ops.aten.isinf,
         ),
     ),
     "lgamma": _unary_spec(
