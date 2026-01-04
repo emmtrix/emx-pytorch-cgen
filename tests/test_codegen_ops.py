@@ -342,12 +342,6 @@ CODEGEN_OP_TEST_CONFIG = {
     torch.ops.aten.transpose.int: {
         "allow_non_tensor_args": True,
     },
-    torch.ops.aten.sum.default: {
-        "sample_filter": lambda sample: sample.input.shape == (3, 5),
-    },
-    torch.ops.aten.prod.default: {
-        "sample_filter": lambda sample: sample.input.shape == (3, 5),
-    },
 }
 DEFAULT_CONSTRAINTS = {
     "allowed_dtypes": (torch.float32,),

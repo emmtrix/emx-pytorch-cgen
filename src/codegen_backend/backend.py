@@ -2033,6 +2033,12 @@ def _compile_graph(
     output_structure = graph.output_structure
     output_value = graph.output_value
     output_inplace_input = graph.output_inplace_input
+    library_cache: Dict[
+        Tuple[Tuple[Tuple[int, ...], ...], Tuple[Tuple[int, ...], ...]],
+        _GenericLibrary,
+    ] = {
+        (lib.input_shapes, lib.input_strides): lib,
+    }
 
     def _recompile(new_inputs: Sequence[object]) -> None:
         nonlocal graph, lib, output_inplace_input
@@ -2062,28 +2068,15 @@ def _compile_graph(
                     raise RefBackendError("codegen backend expects tensor inputs only")
                 input_tensors.append(value)
         _validate_runtime_inputs(input_tensors)
-        def _inputs_match(
-            tensors: Sequence[torch.Tensor],
-            shapes: Sequence[Tuple[int, ...]],
-            strides: Sequence[Tuple[int, ...]],
-        ) -> bool:
-            if any(tuple(tensor.shape) != expected for tensor, expected in zip(tensors, shapes)):
-                return False
-            if any(tuple(tensor.stride()) != expected for tensor, expected in zip(tensors, strides)):
-                return False
-            return True
-
-        expected_shapes = lib.input_shapes
-        expected_strides = lib.input_strides
-        if not _inputs_match(input_tensors, expected_shapes, expected_strides):
-            _recompile(args)
-            expected_shapes = lib.input_shapes
-            expected_strides = lib.input_strides
-        if not _inputs_match(input_tensors, expected_shapes, expected_strides):
-            raise RefBackendError(
-                "codegen backend requires inputs to have shapes "
-                f"{expected_shapes} and strides {expected_strides}"
-            )
+        input_shapes = tuple(tuple(tensor.shape) for tensor in input_tensors)
+        input_strides = tuple(tuple(tensor.stride()) for tensor in input_tensors)
+        cache_key = (input_shapes, input_strides)
+        cached_lib = library_cache.get(cache_key)
+        if cached_lib is None:
+            updated_graph = _analyze_generic_graph(gm, list(args))
+            cached_lib = _compile_generic_library(updated_graph)
+            library_cache[cache_key] = cached_lib
+        lib = cached_lib
         contiguous_inputs = list(input_tensors)
         if output_inplace_input is not None:
             original_input = env[output_inplace_input]
