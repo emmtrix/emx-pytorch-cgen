@@ -2,14 +2,25 @@
 {% for dim in output_dims %}
     for (int64_t i{{ dim.dim }} = 0; i{{ dim.dim }} < {{ dim.size }}; ++i{{ dim.dim }}) {
 {% endfor %}
+{% if needs_init %}
+    int initialized = 0;
+{% endif %}
     {{ acc_type }} acc = {{ init_value }};
 {% if input_rank == 0 %}
+{% if reduce_expr %}
+{{ reduce_expr | indent(4, true) }}
+{% else %}
     acc {{ reduce_op }} {{ input_access }};
+{% endif %}
 {% else %}
 {% for dim in reduction_dims %}
     for (int64_t r{{ dim.dim }} = 0; r{{ dim.dim }} < {{ dim.size }}; ++r{{ dim.dim }}) {
 {% endfor %}
+{% if reduce_expr %}
+{{ reduce_expr | indent(8, true) }}
+{% else %}
         acc {{ reduce_op }} {{ input_access }};
+{% endif %}
 {% for dim in reduction_dims | reverse %}
     }
 {% endfor %}

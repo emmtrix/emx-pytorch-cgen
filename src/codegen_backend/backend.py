@@ -1113,6 +1113,26 @@ SUPPORTED_OPS = {
             torch.ops.aten.mean,
         },
     ),
+    "amax": _OpSpec(
+        name="amax",
+        kind="reduction",
+        symbol=None,
+        supported_targets={
+            torch.amax,
+            torch.ops.aten.amax.default,
+            torch.ops.aten.amax,
+        },
+    ),
+    "amin": _OpSpec(
+        name="amin",
+        kind="reduction",
+        symbol=None,
+        supported_targets={
+            torch.amin,
+            torch.ops.aten.amin.default,
+            torch.ops.aten.amin,
+        },
+    ),
     "matmul": _OpSpec(
         name="matmul",
         kind="matmul",
@@ -1635,16 +1655,31 @@ _REDUCTION_CONFIG = {
         "init_value": 0,
         "reduce_op": "+=",
         "post_op": None,
+        "reduce_expr": None,
     },
     "prod": {
         "init_value": 1,
         "reduce_op": "*=",
         "post_op": None,
+        "reduce_expr": None,
     },
     "mean": {
         "init_value": 0,
         "reduce_op": "+=",
         "post_op": "mean",
+        "reduce_expr": None,
+    },
+    "amax": {
+        "init_value": {"f32": "-INFINITY", "i32": "INT32_MIN"},
+        "reduce_op": None,
+        "post_op": None,
+        "reduce_expr": "acc = (value > acc) ? value : acc;",
+    },
+    "amin": {
+        "init_value": {"f32": "INFINITY", "i32": "INT32_MAX"},
+        "reduce_op": None,
+        "post_op": None,
+        "reduce_expr": "acc = (value < acc) ? value : acc;",
     },
 }
 
@@ -1706,16 +1741,24 @@ def _write_reduction_kernel(
     for dim in reduction_dims:
         reduction_count *= input_shape[dim]
     acc_type = dtype.c_type
-    if dtype.torch_dtype is torch.int32:
-        init_value = str(config["init_value"])
+    init_value = config["init_value"]
+    if isinstance(init_value, dict):
+        init_value = init_value["i32" if dtype.torch_dtype is torch.int32 else "f32"]
+    if isinstance(init_value, str):
+        init_value = init_value
+    elif dtype.torch_dtype is torch.int32:
+        init_value = str(init_value)
     else:
-        init_value = f"{config['init_value']}.0f"
+        init_value = f"{init_value}.0f"
     post_op = None
     if config["post_op"] == "mean":
         if dtype.torch_dtype is torch.int32:
             post_op = f"acc /= {reduction_count};"
         else:
             post_op = f"acc /= (float){reduction_count};"
+    reduce_expr = None
+    if config["reduce_expr"] is not None:
+        reduce_expr = config["reduce_expr"].replace("value", input_access)
     rendered = reduction_template.render(
         signature=signature,
         input_rank=input_rank,
@@ -1732,6 +1775,8 @@ def _write_reduction_kernel(
         init_value=init_value,
         reduce_op=config["reduce_op"],
         post_op=post_op,
+        reduce_expr=reduce_expr,
+        needs_init=False,
     )
     return rendered.strip().splitlines()
 
@@ -2044,7 +2089,7 @@ def _analyze_generic_graph(
             continue
         if node.op in {"call_function", "call_method"}:
             if node.op == "call_method":
-                if node.target not in {"sum", "prod", "mean"}:
+                if node.target not in {"sum", "prod", "mean", "amax", "amin"}:
                     raise RefBackendError(f"Unsupported call_method: {node.target}")
                 op_spec = SUPPORTED_OPS[node.target]
                 inplace_input = None
@@ -2096,6 +2141,23 @@ def _analyze_generic_graph(
                 reduction_dims, keepdim, reduce_all = _parse_reduction_args(
                     op_spec.name, node, input_shapes[0]
                 )
+                if op_spec.name in {"amax", "amin"}:
+                    if reduce_all:
+                        numel = 1
+                        for size in input_shapes[0]:
+                            numel *= size
+                        if numel == 0:
+                            msg = (
+                                f"codegen {op_spec.name} expects dim to be specified "
+                                "for input.numel() == 0"
+                            )
+                            raise RefBackendError(msg)
+                    for dim in reduction_dims:
+                        if input_shapes[0][dim] == 0:
+                            raise RefBackendError(
+                                f"codegen {op_spec.name} expects reduction dim "
+                                f"{dim} to have non-zero size"
+                            )
                 output_shape = _infer_reduction_output_shape(
                     input_shapes[0],
                     reduction_dims,
