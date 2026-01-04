@@ -41,3 +41,10 @@ When adding a new operator, follow the same structure as the existing `add`/`mat
   to the new implementation.
 - **Tests**: add coverage in `tests/` for correct results and error handling
   (e.g. non-contiguous tensors, shape mismatches).
+
+### Codegen backend: adding a new operator
+
+- Register the op in `src/codegen_backend/backend.py` by adding it to `SUPPORTED_OPS` via `_binary_spec`, `_unary_spec`, or a custom `_OpSpec`.
+- Map targets in `TARGET_REGISTRY`, and wire in-place behavior with `inplace_targets`/`inplace_arg_index` when needed.
+- Ensure dtype coverage via `_CODEGEN_DTYPES` and `_INTEGER_CODEGEN_DTYPES`, extending them if the op needs additional dtypes.
+- Test with `PYTHONPATH=src pytest -q`; update golden refs with `UPDATE_REFS=1 PYTHONPATH=src pytest -q`.
