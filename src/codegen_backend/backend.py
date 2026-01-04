@@ -1184,6 +1184,17 @@ _LIBRARY_CACHE: Dict[str, object] = {}
 _C_SRC_DIR = Path(__file__).resolve().parents[2] / "csrc"
 
 
+@dataclass(frozen=True)
+class _MatmulShapeInfo:
+    output_shape: Tuple[int, ...]
+    batch_shape: Tuple[int, ...]
+    a_is_vector: bool
+    b_is_vector: bool
+    m: int
+    n: int
+    k: int
+
+
 def _format_array_suffix(shape: Sequence[int]) -> str:
     return "".join(f"[{dim}]" for dim in shape) or "[1]"
 
@@ -1433,58 +1444,86 @@ def _write_matmul_kernel(
     b_shape: Sequence[int],
     a_strides: Sequence[int],
     b_strides: Sequence[int],
+    output_shape: Sequence[int],
 ) -> List[str]:
-    matmul_template = _get_template_env().get_template("matmul_kernel.c.j2")
-    a_is_contiguous = _is_contiguous(a_shape, a_strides)
-    b_is_contiguous = _is_contiguous(b_shape, b_strides)
+    info = _infer_matmul_shape_info(op_spec, a_shape, b_shape)
+    batch_indices = [f"b{idx}" for idx in range(len(info.batch_shape))]
+    output_indices: List[str] = []
+    output_indices.extend(batch_indices)
+    if not info.a_is_vector:
+        output_indices.append("i")
+    if not info.b_is_vector:
+        output_indices.append("j")
 
-    if op_spec.name == "matmul":
-        m, k = a_shape
-        _, n = b_shape
-        a_suffix = _format_array_suffix((m, k))
-        b_suffix = _format_array_suffix((k, n))
-        out_suffix = _format_array_suffix((m, n))
-        rendered = matmul_template.render(
-            signature=(
-                f"void node{node_index}_{op_spec.name}_f32(const float a{a_suffix}, "
-                f"const float b{b_suffix}, float out{out_suffix}) {{"
-            ),
-            batch=None,
-            m=m,
-            n=n,
-            k=k,
-            a_access=_emit_strided_access(
-                "a", ("i", "t"), a_strides, a_is_contiguous, sizes=a_shape
-            ),
-            b_access=_emit_strided_access(
-                "b", ("t", "j"), b_strides, b_is_contiguous, sizes=b_shape
-            ),
-            out_access="out[i][j]",
-        )
-        return rendered.strip().splitlines()
-    batch, m, k = a_shape
-    _, _, n = b_shape
-    a_suffix = _format_array_suffix((batch, m, k))
-    b_suffix = _format_array_suffix((batch, k, n))
-    out_suffix = _format_array_suffix((batch, m, n))
-    rendered = matmul_template.render(
-        signature=(
-            f"void node{node_index}_{op_spec.name}_f32(const float a{a_suffix}, "
-            f"const float b{b_suffix}, float out{out_suffix}) {{"
-        ),
-        batch=batch,
-        m=m,
-        n=n,
-        k=k,
-        a_access=_emit_strided_access(
-            "a", ("b_idx", "i", "t"), a_strides, a_is_contiguous, sizes=a_shape
-        ),
-        b_access=_emit_strided_access(
-            "b", ("b_idx", "t", "j"), b_strides, b_is_contiguous, sizes=b_shape
-        ),
-        out_access="out[b_idx][i][j]",
+    if output_shape:
+        out_access = f"out{''.join(f'[{idx}]' for idx in output_indices)}"
+    else:
+        out_access = "out[0]"
+
+    a_indices: List[str] = []
+    if info.a_is_vector:
+        a_indices.append("t")
+    else:
+        a_batch_rank = len(a_shape) - 2
+        batch_rank = len(info.batch_shape)
+        for idx in range(a_batch_rank):
+            output_idx = batch_rank - a_batch_rank + idx
+            a_indices.append(f"b{output_idx}")
+        a_indices.extend(["i", "t"])
+
+    b_indices: List[str] = []
+    if info.b_is_vector:
+        b_indices.append("t")
+    else:
+        b_batch_rank = len(b_shape) - 2
+        batch_rank = len(info.batch_shape)
+        for idx in range(b_batch_rank):
+            output_idx = batch_rank - b_batch_rank + idx
+            b_indices.append(f"b{output_idx}")
+        b_indices.extend(["t", "j"])
+
+    a_access = _emit_strided_access(
+        "a", a_indices, a_strides, contig=False, sizes=a_shape
     )
-    return rendered.strip().splitlines()
+    b_access = _emit_strided_access(
+        "b", b_indices, b_strides, contig=False, sizes=b_shape
+    )
+
+    signature = (
+        f"void node{node_index}_{op_spec.name}_f32("
+        f"const float a{_format_array_suffix(a_shape)}, "
+        f"const float b{_format_array_suffix(b_shape)}, "
+        f"float out{_format_array_suffix(output_shape)}) {{"
+    )
+    lines = [signature]
+    indent = "    "
+    for dim, size in enumerate(info.batch_shape):
+        lines.append(
+            f"{indent}for (int64_t b{dim} = 0; b{dim} < {size}; ++b{dim}) {{"
+        )
+        indent += "    "
+    if not info.a_is_vector:
+        lines.append(f"{indent}for (int64_t i = 0; i < {info.m}; ++i) {{")
+        indent += "    "
+    if not info.b_is_vector:
+        lines.append(f"{indent}for (int64_t j = 0; j < {info.n}; ++j) {{")
+        indent += "    "
+    lines.append(f"{indent}float acc = 0.0f;")
+    lines.append(f"{indent}for (int64_t t = 0; t < {info.k}; ++t) {{")
+    lines.append(f"{indent}    acc += {a_access} * {b_access};")
+    lines.append(f"{indent}}}")
+    lines.append(f"{indent}{out_access} = acc;")
+    if not info.b_is_vector:
+        indent = indent[:-4]
+        lines.append(f"{indent}}}")
+    if not info.a_is_vector:
+        indent = indent[:-4]
+        lines.append(f"{indent}}}")
+    for _ in range(len(info.batch_shape)):
+        indent = indent[:-4]
+        lines.append(f"{indent}}}")
+    lines.append("}")
+    return lines
 
 
 _REDUCTION_CONFIG = {
@@ -1606,7 +1645,13 @@ def _write_generic_source(graph: _GenericGraph) -> str:
             lhs_strides = graph.strides[lhs]
             rhs_strides = graph.strides[rhs]
             kernel_lines = _write_matmul_kernel(
-                index, op_node.spec, lhs_shape, rhs_shape, lhs_strides, rhs_strides
+                index,
+                op_node.spec,
+                lhs_shape,
+                rhs_shape,
+                lhs_strides,
+                rhs_strides,
+                op_node.output_shape,
             )
         kernels.append("\n".join(kernel_lines))
     input_args = ", ".join(
@@ -1695,11 +1740,7 @@ def _infer_output_shape(
         return ()
     a_shape, b_shape = input_shapes
     if op_spec.name == "matmul":
-        if len(a_shape) != 2 or len(b_shape) != 2:
-            raise RefBackendError("codegen matmul requires 2D inputs")
-        if a_shape[1] != b_shape[0]:
-            raise RefBackendError("codegen matmul requires inner dimensions to match")
-        return (a_shape[0], b_shape[1])
+        return _infer_matmul_shape_info(op_spec, a_shape, b_shape).output_shape
     if len(a_shape) != 3 or len(b_shape) != 3:
         raise RefBackendError("codegen bmm requires 3D inputs")
     if a_shape[0] != b_shape[0]:
@@ -1707,6 +1748,53 @@ def _infer_output_shape(
     if a_shape[2] != b_shape[1]:
         raise RefBackendError("codegen bmm requires inner dimensions to match")
     return (a_shape[0], a_shape[1], b_shape[2])
+
+
+def _infer_matmul_shape_info(
+    op_spec: _OpSpec, a_shape: Sequence[int], b_shape: Sequence[int]
+) -> _MatmulShapeInfo:
+    a_dim = len(a_shape)
+    b_dim = len(b_shape)
+    if a_dim == 0 or b_dim == 0:
+        raise RefBackendError("codegen matmul does not support scalar inputs")
+    a_is_vector = a_dim == 1
+    b_is_vector = b_dim == 1
+    if a_is_vector:
+        a_batch = ()
+        m = 1
+        k = a_shape[0]
+    else:
+        a_batch = a_shape[:-2]
+        m = a_shape[-2]
+        k = a_shape[-1]
+    if b_is_vector:
+        b_batch = ()
+        k_rhs = b_shape[0]
+        n = 1
+    else:
+        b_batch = b_shape[:-2]
+        k_rhs = b_shape[-2]
+        n = b_shape[-1]
+    if k != k_rhs:
+        raise RefBackendError("codegen matmul requires inner dimensions to match")
+    batch_shape = _broadcast_output_shape(op_spec, a_batch, b_batch)
+    if a_is_vector and b_is_vector:
+        output_shape: Tuple[int, ...] = ()
+    elif a_is_vector:
+        output_shape = (*batch_shape, n)
+    elif b_is_vector:
+        output_shape = (*batch_shape, m)
+    else:
+        output_shape = (*batch_shape, m, n)
+    return _MatmulShapeInfo(
+        output_shape=output_shape,
+        batch_shape=batch_shape,
+        a_is_vector=a_is_vector,
+        b_is_vector=b_is_vector,
+        m=m,
+        n=n,
+        k=k,
+    )
 
 
 def _normalize_reduction_dims(

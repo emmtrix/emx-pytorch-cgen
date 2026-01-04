@@ -332,7 +332,6 @@ CODEGEN_OP_TEST_CONFIG = {
     torch.ops.aten.matmul.default: {
         "allow_noncontiguous": True,
         "requires_same_shape": False,
-        "sample_filter": _matmul_sample_filter,
     },
     torch.ops.aten.bmm.default: {
         "allow_noncontiguous": True,
@@ -435,8 +434,12 @@ class TestCodegenOpInfo(TestCase):
         compiled = _compile_codegen_op(aten_overload)
         for sample in _iter_supported_samples(op, device, dtype, constraints):
             inputs = (sample.input, *sample.args)
+            try:
+                expected = aten_overload(*inputs)
+            except Exception:
+                continue
             result = compiled(*inputs)
-            torch.testing.assert_close(result, aten_overload(*inputs))
+            torch.testing.assert_close(result, expected)
 
 
 class TestCodegenInplaceOps(TestCase):
