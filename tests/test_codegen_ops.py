@@ -197,6 +197,8 @@ CODEGEN_ATEN_OPS = [
     torch.ops.aten.all.default,
     torch.ops.aten.angle.default,
     torch.ops.aten.any.default,
+    torch.ops.aten.amax.default,
+    torch.ops.aten.amin.default,
     torch.ops.aten.asin.default,
     torch.ops.aten.asinh.default,
     torch.ops.aten.atan.default,
@@ -352,6 +354,7 @@ INPLACE_ATEN_OPS = [
     torch.ops.aten.log1p_.default,
     torch.ops.aten.log2_.default,
     torch.ops.aten.logit_.default,
+    torch.ops.aten.mish_.default,
     torch.ops.aten.logical_and_.default,
     torch.ops.aten.logical_not_.default,
     torch.ops.aten.logical_or_.default,
@@ -437,6 +440,14 @@ CODEGEN_OP_TEST_CONFIG = {
         "requires_same_shape": False,
         "sample_filter": _broadcastable_sample_filter,
     },
+    torch.ops.aten.amax.default: {
+        "allow_kwargs": True,
+        "allow_non_tensor_args": True,
+    },
+    torch.ops.aten.amin.default: {
+        "allow_kwargs": True,
+        "allow_non_tensor_args": True,
+    },
     torch.ops.aten.bitwise_left_shift.Tensor: {
         "allowed_dtypes": (torch.int8, torch.int32),
     },
@@ -464,6 +475,9 @@ CODEGEN_OP_TEST_CONFIG = {
     torch.ops.aten.where.self: {
         "requires_same_shape": False,
         "sample_filter": _broadcastable_sample_filter,
+    },
+    torch.ops.aten.mish_.default: {
+        "allowed_dtypes": (torch.float32,),
     },
     torch.ops.aten.matmul.default: {
         "allow_noncontiguous": True,
