@@ -1297,6 +1297,14 @@ SUPPORTED_OPS = {
             torch.ops.aten.logit_,
         ),
     ),
+    "isfinite": _unary_spec(
+        "isfinite",
+        (
+            torch.isfinite,
+            torch.ops.aten.isfinite.default,
+            torch.ops.aten.isfinite,
+        ),
+    ),
     "nan_to_num": _unary_spec(
         "nan_to_num",
         (

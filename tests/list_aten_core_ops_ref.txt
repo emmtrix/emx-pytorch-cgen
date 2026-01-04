@@ -1010,7 +1010,7 @@ isalpha                                  -     -
 isclose                                  -     -      
 isdecimal                                -     -      
 isdigit                                  -     -      
-isfinite                                 -     -      
+isfinite                                 -     yes    
 isidentifier                             -     -      
 isin                                     -     -      
 isinf                                    -     yes    
