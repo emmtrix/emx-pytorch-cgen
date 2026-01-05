@@ -51,19 +51,6 @@ def _update_sample(sample, updated_tensors):
     return SampleInput(new_input, args=tuple(new_args), kwargs=sample.kwargs)
 
 
-def _addmm_sample_filter(sample):
-    tensors = _extract_tensors(sample)
-    if len(tensors) != 3:
-        return False
-    input_tensor, mat1, mat2 = tensors
-    if input_tensor.ndim != 2 or mat1.ndim != 2 or mat2.ndim != 2:
-        return False
-    if mat1.shape[1] != mat2.shape[0]:
-        return False
-    expected_shape = (mat1.shape[0], mat2.shape[1])
-    return input_tensor.shape == expected_shape
-
-
 def _addbmm_sample_filter(sample):
     tensors = _extract_tensors(sample)
     if len(tensors) != 3:
@@ -940,7 +927,6 @@ CODEGEN_OP_TEST_CONFIG = {
         "allow_noncontiguous": True,
         "allow_kwargs": True,
         "requires_same_shape": False,
-        "sample_filter": _addmm_sample_filter,
     },
     torch.ops.aten.addbmm.default: {
         "allowed_dtypes": (torch.float32,),
