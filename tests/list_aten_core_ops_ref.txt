@@ -548,18 +548,18 @@ angle                                    yes   yes
 any                                      -     yes    
 append                                   -     -      
 arange                                   -     -      
-arccos                                   -     -      
-arccos_                                  -     -      
+arccos                                   -     yes    
+arccos_                                  -     yes    
 arccosh                                  -     -      
 arccosh_                                 -     yes    
-arcsin                                   -     -      
-arcsin_                                  -     -      
-arcsinh                                  -     -      
-arcsinh_                                 -     -      
-arctan                                   -     -      
+arcsin                                   -     yes    
+arcsin_                                  -     yes    
+arcsinh                                  -     yes    
+arcsinh_                                 -     yes    
+arctan                                   -     yes    
 arctan2                                  -     -      
 arctan2_                                 -     -      
-arctan_                                  -     -      
+arctan_                                  -     yes    
 arctanh                                  -     -      
 arctanh_                                 -     -      
 argmax                                   -     yes    
@@ -1118,7 +1118,7 @@ log_sigmoid_backward                     -     -
 log_sigmoid_forward                      -     -      
 log_softmax                              -     yes    
 logaddexp                                yes   yes    
-logaddexp2                               -     -      
+logaddexp2                               -     yes    
 logcumsumexp                             -     -      
 logdet                                   -     -      
 logical_and                              -     yes    
@@ -1718,8 +1718,8 @@ zfill                                    -     -
 Summary
 total aten ops: 1714
 supported by cref only: 5
-supported by codegen only: 124
+supported by codegen only: 133
 supported by both: 77
-unsupported by either: 1508
-supported by codegen: 201 / 1714 (11.7 %)
+unsupported by either: 1499
+supported by codegen: 210 / 1714 (12.3 %)
 supported by c-ref: 82 / 1714 (4.8 %)

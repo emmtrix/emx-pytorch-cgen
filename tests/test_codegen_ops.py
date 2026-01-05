@@ -306,6 +306,10 @@ CODEGEN_ATEN_OPS = [
     torch.ops.aten.atan.default,
     torch.ops.aten.atan2.default,
     torch.ops.aten.atanh.default,
+    torch.ops.aten.arccos.default,
+    torch.ops.aten.arcsin.default,
+    torch.ops.aten.arcsinh.default,
+    torch.ops.aten.arctan.default,
     torch.ops.aten.bitwise_and.Tensor,
     torch.ops.aten.bitwise_left_shift.Tensor,
     torch.ops.aten.bitwise_not.default,
@@ -363,6 +367,7 @@ CODEGEN_ATEN_OPS = [
     torch.ops.aten.log1p.default,
     torch.ops.aten.log2.default,
     torch.ops.aten.logaddexp.default,
+    torch.ops.aten.logaddexp2.default,
     torch.ops.aten.log_softmax.int,
     torch.ops.aten.logit.default,
     torch.ops.aten.addmm.default,
@@ -422,11 +427,15 @@ INPLACE_ATEN_OPS = [
     torch.ops.aten.add_.Tensor,
     torch.ops.aten.abs_.default,
     torch.ops.aten.acos_.default,
+    torch.ops.aten.arccos_.default,
     torch.ops.aten.acosh_.default,
     torch.ops.aten.arccosh_.default,
     torch.ops.aten.asin_.default,
+    torch.ops.aten.arcsin_.default,
     torch.ops.aten.asinh_.default,
+    torch.ops.aten.arcsinh_.default,
     torch.ops.aten.atan_.default,
+    torch.ops.aten.arctan_.default,
     torch.ops.aten.atan2_.default,
     torch.ops.aten.atanh_.default,
     torch.ops.aten.bitwise_and_.Tensor,
@@ -549,9 +558,16 @@ def _find_opinfo_for_overload(aten_overload):
     return candidates[0]
 
 
+ALIASED_CODEGEN_OPS = {
+    torch.ops.aten.arccos.default,
+    torch.ops.aten.arcsin.default,
+    torch.ops.aten.arcsinh.default,
+    torch.ops.aten.arctan.default,
+}
 CODEGEN_OPS_UNDER_TEST = [
     (aten_overload, _find_opinfo_for_overload(aten_overload))
     for aten_overload in CODEGEN_ATEN_OPS
+    if aten_overload not in ALIASED_CODEGEN_OPS
 ]
 CODEGEN_OPINFO_LIST = [opinfo for _, opinfo in CODEGEN_OPS_UNDER_TEST]
 CODEGEN_OP_TEST_CONFIG = {
@@ -739,7 +755,7 @@ def _sanitize_inplace_inputs(
     aten_overload: torch._ops.OpOverload, lhs: torch.Tensor, rhs: torch.Tensor
 ) -> tuple[torch.Tensor, torch.Tensor]:
     name = aten_overload._schema.name.split("::")[-1]
-    unit_range_ops = {"acos_", "asin_", "atanh_", "erfinv_"}
+    unit_range_ops = {"acos_", "arccos_", "asin_", "arcsin_", "atanh_", "erfinv_"}
     ge1_ops = {"acosh_", "arccosh_"}
     positive_ops = {"digamma_", "lgamma_", "log_", "log10_", "log2_", "rsqrt_", "sqrt_"}
     log1p_ops = {"log1p_"}
@@ -836,6 +852,27 @@ class TestCodegenAliasedOps(TestCase):
             expected = aten_overload(*inputs)
             result = compiled(*inputs)
             torch.testing.assert_close(result, expected)
+
+    def test_codegen_aliases_match_eager(self):
+        aliased_ops = [
+            torch.ops.aten.arccos.default,
+            torch.ops.aten.arcsin.default,
+            torch.ops.aten.arcsinh.default,
+            torch.ops.aten.arctan.default,
+        ]
+        for aten_overload in aliased_ops:
+            compiled = _compile_codegen_op(aten_overload)
+            for dtype in (torch.float32,):
+                if aten_overload in {
+                    torch.ops.aten.arccos.default,
+                    torch.ops.aten.arcsin.default,
+                }:
+                    inputs = (torch.rand(2, 3, dtype=dtype) * 2 - 1,)
+                else:
+                    inputs = (torch.randn(2, 3, dtype=dtype),)
+                expected = aten_overload(*inputs)
+                result = compiled(*inputs)
+                torch.testing.assert_close(result, expected)
 
 
 class TestCodegenInplaceOps(TestCase):
