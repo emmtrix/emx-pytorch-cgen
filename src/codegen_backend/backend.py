@@ -915,6 +915,7 @@ def _write_addmm_kernel(
     node_index: int,
     op_spec: _OpSpec,
     input_shape: Sequence[int],
+    output_shape: Sequence[int],
     mat1_shape: Sequence[int],
     mat2_shape: Sequence[int],
     input_strides: Sequence[int],
@@ -927,10 +928,9 @@ def _write_addmm_kernel(
     beta: float,
 ) -> List[str]:
     addmm_template = _get_template_env().get_template("addmm_kernel.c.j2")
-    input_is_contiguous = _is_contiguous(input_shape, input_strides)
     mat1_is_contiguous = _is_contiguous(mat1_shape, mat1_strides)
     mat2_is_contiguous = _is_contiguous(mat2_shape, mat2_strides)
-    output_is_contiguous = _is_contiguous(input_shape, output_strides)
+    output_is_contiguous = _is_contiguous(output_shape, output_strides)
     acc_type = dtype.c_type
     acc_init = "0" if dtype.torch_dtype in _INTEGER_CODEGEN_DTYPES else "0.0f"
     m, k = mat1_shape
@@ -938,7 +938,10 @@ def _write_addmm_kernel(
     input_suffix = _format_array_suffix(input_shape)
     mat1_suffix = _format_array_suffix(mat1_shape)
     mat2_suffix = _format_array_suffix(mat2_shape)
-    out_suffix = _format_array_suffix(input_shape)
+    out_suffix = _format_array_suffix(output_shape)
+    output_indices = ("i", "j")
+    offset = len(output_indices) - len(input_shape)
+    input_indices = output_indices[offset:] if input_shape else ()
     rendered = addmm_template.render(
         signature=(
             f"void node{node_index}_{op_spec.name}_{dtype.suffix}("
@@ -954,9 +957,9 @@ def _write_addmm_kernel(
         acc_init=acc_init,
         input_access=_emit_strided_access(
             "input",
-            ("i", "j"),
+            input_indices,
             input_strides,
-            input_is_contiguous,
+            False,
             sizes=input_shape,
             c_type=dtype.c_type,
         ),
@@ -981,7 +984,7 @@ def _write_addmm_kernel(
             ("i", "j"),
             output_strides,
             output_is_contiguous,
-            sizes=input_shape,
+            sizes=output_shape,
             c_type=dtype.c_type,
         ),
         alpha=_format_scalar_literal(alpha, dtype),
@@ -2179,6 +2182,7 @@ def _write_generic_source(graph: _GenericGraph) -> str:
                 index,
                 op_node.spec,
                 graph.shapes[input_node],
+                graph.shapes[op_node.node],
                 graph.shapes[mat1_node],
                 graph.shapes[mat2_node],
                 graph.strides[input_node],
@@ -2389,14 +2393,14 @@ def _infer_output_shape(
         raise RefBackendError("codegen conv2d expects convolution arguments")
     if op_spec.kind == "addmm":
         input_shape, mat1_shape, mat2_shape = input_shapes
-        if len(input_shape) != 2 or len(mat1_shape) != 2 or len(mat2_shape) != 2:
+        if len(input_shape) > 2 or len(mat1_shape) != 2 or len(mat2_shape) != 2:
             raise RefBackendError("codegen addmm expects 2D inputs")
         if mat1_shape[1] != mat2_shape[0]:
             raise RefBackendError("codegen addmm requires inner dimensions to match")
         expected_shape = (mat1_shape[0], mat2_shape[1])
-        if input_shape != expected_shape:
+        if _broadcast_output_shape(op_spec, input_shape, expected_shape) != expected_shape:
             raise RefBackendError(
-                "codegen addmm expects input shape to match matmul output"
+                "codegen addmm expects input shape to be broadcastable to matmul output"
             )
         return expected_shape
     if op_spec.kind == "addbmm":
