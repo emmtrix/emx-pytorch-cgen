@@ -1537,6 +1537,7 @@ def _write_generic_source(graph: _GenericGraph) -> str:
     op_nodes = graph.op_nodes
     headers = [
         "#include <stdint.h>",
+        "#include <stdbool.h>",
         f"#include \"{graph.dtype.scalar_header}\"",
     ]
     kernels: List[str] = []

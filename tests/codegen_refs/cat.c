@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <stdbool.h>
 #include "ops_scalar_f32.h"
 
 void node1_cat_f32(const float a0[2][2], const float a1[2][1], float out[2][3]) {
