@@ -500,8 +500,8 @@ _wrapped_linear_prepack                  -     -
 _wrapped_quantized_linear_prepacked      -     -      
 abs                                      yes   yes    
 abs_                                     -     yes    
-absolute                                 -     -      
-absolute_                                -     -      
+absolute                                 -     yes    
+absolute_                                -     yes    
 acos                                     yes   yes    
 acos_                                    -     yes    
 acosh                                    yes   yes    
@@ -927,7 +927,7 @@ hamming_window                           -     -
 hann_window                              -     -      
 hardshrink                               -     -      
 hardshrink_backward                      -     -      
-hardsigmoid                              -     -      
+hardsigmoid                              -     yes    
 hardsigmoid_                             -     -      
 hardsigmoid_backward                     -     -      
 hardswish                                -     yes    
@@ -1113,7 +1113,7 @@ log2_                                    -     yes
 log_                                     -     yes    
 log_normal                               -     -      
 log_normal_                              -     -      
-log_sigmoid                              -     -      
+log_sigmoid                              -     yes    
 log_sigmoid_backward                     -     -      
 log_sigmoid_forward                      -     -      
 log_softmax                              -     yes    
@@ -1366,7 +1366,7 @@ reflection_pad2d_backward                -     -
 reflection_pad3d                         -     -      
 reflection_pad3d_backward                -     -      
 relu                                     yes   yes    
-relu6                                    -     -      
+relu6                                    -     yes    
 relu6_                                   -     -      
 relu_                                    -     yes    
 remainder                                yes   yes    
@@ -1443,7 +1443,7 @@ select                                   -     yes
 select_backward                          -     -      
 select_copy                              -     -      
 select_scatter                           -     -      
-selu                                     -     -      
+selu                                     -     yes    
 selu_                                    -     -      
 set                                      -     -      
 set_                                     -     -      
@@ -1718,8 +1718,8 @@ zfill                                    -     -
 Summary
 total aten ops: 1714
 supported by cref only: 5
-supported by codegen only: 133
+supported by codegen only: 139
 supported by both: 77
-unsupported by either: 1499
-supported by codegen: 210 / 1714 (12.3 %)
+unsupported by either: 1493
+supported by codegen: 216 / 1714 (12.6 %)
 supported by c-ref: 82 / 1714 (4.8 %)

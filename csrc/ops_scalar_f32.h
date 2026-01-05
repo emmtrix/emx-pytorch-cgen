@@ -15,6 +15,10 @@ static inline float ref_scalar_f32_abs(float a) {
     return fabsf(a);
 }
 
+static inline float ref_scalar_f32_absolute(float a) {
+    return ref_scalar_f32_abs(a);
+}
+
 static inline float ref_scalar_f32_add(float a, float b) {
     return a + b;
 }
@@ -324,6 +328,13 @@ static inline float ref_scalar_f32_sigmoid(float a) {
     return 1.0f / (1.0f + expf(-a));
 }
 
+static inline float ref_scalar_f32_log_sigmoid(float a) {
+    if (a >= 0.0f) {
+        return -log1pf(expf(-a));
+    }
+    return a - log1pf(expf(a));
+}
+
 static inline float ref_scalar_f32_silu(float a) {
     return a / (1.0f + expf(-a));
 }
@@ -340,6 +351,25 @@ static inline float ref_scalar_f32_mish(float a) {
     return a * tanhf(softplus);
   }
   
+static inline float ref_scalar_f32_selu(float a) {
+    const float alpha = 1.6732632423543772848170429916717f;
+    const float scale = 1.0507009873554804934193349852946f;
+    if (a > 0.0f) {
+        return scale * a;
+    }
+    return scale * alpha * (expf(a) - 1.0f);
+}
+
+static inline float ref_scalar_f32_relu6(float a) {
+    return fminf(6.0f, fmaxf(0.0f, a));
+}
+
+static inline float ref_scalar_f32_hardsigmoid(float a) {
+    float shifted = a + 3.0f;
+    float clamped = fminf(6.0f, fmaxf(0.0f, shifted));
+    return clamped / 6.0f;
+}
+
 static inline float ref_scalar_f32_hardswish(float a) {
     float shifted = a + 3.0f;
     float clamped = fminf(6.0f, fmaxf(0.0f, shifted));
