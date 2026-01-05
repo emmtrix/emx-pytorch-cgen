@@ -291,6 +291,7 @@ def _iter_supported_samples(op, device, dtype, constraints):
 
 CODEGEN_ATEN_OPS = [
     torch.ops.aten.abs.default,
+    torch.ops.aten.absolute.default,
     torch.ops.aten.acos.default,
     torch.ops.aten.acosh.default,
     torch.ops.aten.add.Tensor,
@@ -368,6 +369,7 @@ CODEGEN_ATEN_OPS = [
     torch.ops.aten.log2.default,
     torch.ops.aten.logaddexp.default,
     torch.ops.aten.logaddexp2.default,
+    torch.ops.aten.log_sigmoid.default,
     torch.ops.aten.log_softmax.int,
     torch.ops.aten.logit.default,
     torch.ops.aten.addmm.default,
@@ -393,10 +395,12 @@ CODEGEN_ATEN_OPS = [
     torch.ops.aten.remainder.Tensor,
     torch.ops.aten.round.default,
     torch.ops.aten.rsqrt.default,
+    torch.ops.aten.selu.default,
     torch.ops.aten.sgn.default,
     torch.ops.aten.sigmoid.default,
     torch.ops.aten.sign.default,
     torch.ops.aten.softmax.int,
+    torch.ops.aten.hardsigmoid.default,
     torch.ops.aten.hardswish.default,
     torch.ops.aten.sin.default,
     torch.ops.aten.sinc.default,
@@ -407,6 +411,7 @@ CODEGEN_ATEN_OPS = [
     torch.ops.aten.sum.default,
     torch.ops.aten.tan.default,
     torch.ops.aten.tanh.default,
+    torch.ops.aten.relu6.default,
     torch.ops.aten.permute.default,
     torch.ops.aten.view.default,
     torch.ops.aten.reshape.default,
@@ -426,6 +431,7 @@ if aten_cbrt is not None:
 INPLACE_ATEN_OPS = [
     torch.ops.aten.add_.Tensor,
     torch.ops.aten.abs_.default,
+    torch.ops.aten.absolute_.default,
     torch.ops.aten.acos_.default,
     torch.ops.aten.arccos_.default,
     torch.ops.aten.acosh_.default,
@@ -527,7 +533,11 @@ def _lookup_opinfo(aten_name, variant_test_name):
 
 CODEGEN_OPINFO_OVERRIDES = {
     torch.ops.aten.div.Tensor: _lookup_opinfo("div", "no_rounding_mode"),
+    torch.ops.aten.hardsigmoid.default: _lookup_opinfo(
+        "nn.functional.hardsigmoid", ""
+    ),
     torch.ops.aten.round.default: _lookup_opinfo("round", ""),
+    torch.ops.aten.selu.default: _lookup_opinfo("nn.functional.selu", ""),
     torch.ops.aten.std.default: _lookup_opinfo("std", ""),
     torch.ops.aten.softmax.int: _lookup_opinfo("softmax", ""),
     torch.ops.aten.log_softmax.int: _lookup_opinfo("log_softmax", ""),
@@ -559,6 +569,7 @@ def _find_opinfo_for_overload(aten_overload):
 
 
 ALIASED_CODEGEN_OPS = {
+    torch.ops.aten.absolute.default,
     torch.ops.aten.arccos.default,
     torch.ops.aten.arcsin.default,
     torch.ops.aten.arcsinh.default,
@@ -629,6 +640,9 @@ CODEGEN_OP_TEST_CONFIG = {
         "allow_non_tensor_args": True,
         "allow_kwargs": True,
     },
+    torch.ops.aten.log_sigmoid.default: {
+        "allowed_dtypes": (torch.float32,),
+    },
     torch.ops.aten.digamma.default: {
         "allowed_dtypes": (torch.float32,),
         "rtol": 3e-5,
@@ -646,6 +660,9 @@ CODEGEN_OP_TEST_CONFIG = {
         "requires_same_shape": False,
         "sample_filter": _bmm_sample_filter,
     },
+    torch.ops.aten.hardsigmoid.default: {
+        "allowed_dtypes": (torch.float32,),
+    },
     torch.ops.aten.std.default: {
         "allow_non_tensor_args": True,
     },
@@ -657,6 +674,12 @@ CODEGEN_OP_TEST_CONFIG = {
         "expand_input_list": True,
         "requires_same_shape": False,
         "sample_filter": _concat_sample_filter,
+    },
+    torch.ops.aten.relu6.default: {
+        "allowed_dtypes": (torch.float32, torch.int8, torch.int32),
+    },
+    torch.ops.aten.selu.default: {
+        "allowed_dtypes": (torch.float32,),
     },
     torch.ops.aten.conv2d.default: {
         "allowed_dtypes": (torch.float32,),
@@ -855,6 +878,7 @@ class TestCodegenAliasedOps(TestCase):
 
     def test_codegen_aliases_match_eager(self):
         aliased_ops = [
+            torch.ops.aten.absolute.default,
             torch.ops.aten.arccos.default,
             torch.ops.aten.arcsin.default,
             torch.ops.aten.arcsinh.default,
@@ -863,7 +887,9 @@ class TestCodegenAliasedOps(TestCase):
         for aten_overload in aliased_ops:
             compiled = _compile_codegen_op(aten_overload)
             for dtype in (torch.float32,):
-                if aten_overload in {
+                if aten_overload is torch.ops.aten.absolute.default:
+                    inputs = (torch.randn(2, 3, dtype=dtype),)
+                elif aten_overload in {
                     torch.ops.aten.arccos.default,
                     torch.ops.aten.arcsin.default,
                 }:

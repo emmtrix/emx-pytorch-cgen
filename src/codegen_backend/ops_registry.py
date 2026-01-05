@@ -547,6 +547,16 @@ _REGISTRY.register_unary("abs").targets(
     torch.ops.aten.abs_.default,
     torch.ops.aten.abs_,
 ).build()
+_REGISTRY.register_unary("absolute").targets(
+    torch.absolute,
+    torch.ops.aten.absolute.default,
+    torch.ops.aten.absolute,
+    torch.ops.aten.absolute_.default,
+    torch.ops.aten.absolute_,
+).inplace(
+    torch.ops.aten.absolute_.default,
+    torch.ops.aten.absolute_,
+).build()
 _REGISTRY.register_unary("sqrt").targets(
     torch.sqrt,
     torch.ops.aten.sqrt.default,
@@ -820,6 +830,31 @@ _REGISTRY.register_unary("sigmoid").targets(
 ).inplace(
     torch.ops.aten.sigmoid_.default,
     torch.ops.aten.sigmoid_,
+).build()
+_REGISTRY.register_unary("log_sigmoid").targets(
+    F.logsigmoid,
+    torch.ops.aten.log_sigmoid.default,
+    torch.ops.aten.log_sigmoid,
+).build()
+_REGISTRY.register_unary("selu").targets(
+    F.selu,
+    torch.ops.aten.selu.default,
+    torch.ops.aten.selu,
+    torch.ops.aten.selu_.default,
+    torch.ops.aten.selu_,
+).inplace(
+    torch.ops.aten.selu_.default,
+    torch.ops.aten.selu_,
+).build()
+_REGISTRY.register_unary("relu6").targets(
+    F.relu6,
+    torch.ops.aten.relu6.default,
+    torch.ops.aten.relu6,
+).build()
+_REGISTRY.register_unary("hardsigmoid").targets(
+    F.hardsigmoid,
+    torch.ops.aten.hardsigmoid.default,
+    torch.ops.aten.hardsigmoid,
 ).build()
 _REGISTRY.register_unary("mish").targets(
     F.mish,

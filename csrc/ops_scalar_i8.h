@@ -20,6 +20,10 @@ static inline int8_t ref_scalar_i8_abs(int8_t a) {
     return a < 0 ? (int8_t)-a : a;
 }
 
+static inline int8_t ref_scalar_i8_absolute(int8_t a) {
+    return ref_scalar_i8_abs(a);
+}
+
 static inline int8_t ref_scalar_i8_add(int8_t a, int8_t b) {
     return (int8_t)(a + b);
 }
@@ -287,6 +291,7 @@ REF_I8_UNARY_FROM_F32(log2)
 REF_I8_UNARY_FROM_F32(isfinite)
 REF_I8_UNARY_FROM_F32(isnan)
 REF_I8_UNARY_FROM_F32(logit)
+REF_I8_UNARY_FROM_F32(log_sigmoid)
 REF_I8_UNARY_FROM_F32(isinf)
 REF_I8_UNARY_FROM_F32(isneginf)
 REF_I8_UNARY_FROM_F32(isposinf)
@@ -294,6 +299,9 @@ REF_I8_UNARY_FROM_F32(nan_to_num)
 REF_I8_UNARY_FROM_F32(rad2deg)
 REF_I8_UNARY_FROM_F32(rsqrt)
 REF_I8_UNARY_FROM_F32(sigmoid)
+REF_I8_UNARY_FROM_F32(selu)
+REF_I8_UNARY_FROM_F32(relu6)
+REF_I8_UNARY_FROM_F32(hardsigmoid)
 REF_I8_UNARY_FROM_F32(silu)
 REF_I8_UNARY_FROM_F32(mish)
 REF_I8_UNARY_FROM_F32(hardswish)
