@@ -144,6 +144,13 @@ class _OpNode:
     conv2d_dilation: Tuple[int, int] | None = None
     conv2d_groups: int | None = None
     conv2d_has_bias: bool = False
+    pool2d_kernel_size: Tuple[int, int] | None = None
+    pool2d_stride: Tuple[int, int] | None = None
+    pool2d_padding: Tuple[int, int] | None = None
+    pool2d_dilation: Tuple[int, int] | None = None
+    pool2d_ceil_mode: bool = False
+    pool2d_count_include_pad: bool = False
+    pool2d_divisor_override: int | None = None
     addmm_alpha: float | None = None
     addmm_beta: float | None = None
     params: Dict[str, object] = field(default_factory=dict)
@@ -275,6 +282,47 @@ def _conv2d_output_shape_from_shapes(
     out_h = numerator_h // stride_h + 1
     out_w = numerator_w // stride_w + 1
     return batch, out_channels, out_h, out_w
+
+
+def _normalize_pool2d_param(name: str, value: object) -> Tuple[int, int]:
+    if isinstance(value, int):
+        return (value, value)
+    if (
+        isinstance(value, tuple)
+        and len(value) == 2
+        and all(isinstance(item, int) for item in value)
+    ):
+        return value
+    if (
+        isinstance(value, list)
+        and len(value) == 2
+        and all(isinstance(item, int) for item in value)
+    ):
+        return (value[0], value[1])
+    raise RefBackendError(f"pool2d expects {name} to be an int or a pair of ints")
+
+
+def _pool2d_output_shape_from_shapes(
+    input_shape: Sequence[int],
+    kernel_size: Tuple[int, int],
+    stride: Tuple[int, int],
+    padding: Tuple[int, int],
+    dilation: Tuple[int, int],
+) -> Tuple[int, int, int, int]:
+    batch, channels, in_h, in_w = input_shape
+    k_h, k_w = kernel_size
+    stride_h, stride_w = stride
+    pad_h, pad_w = padding
+    dil_h, dil_w = dilation
+    numerator_h = in_h + 2 * pad_h - dil_h * (k_h - 1) - 1
+    numerator_w = in_w + 2 * pad_w - dil_w * (k_w - 1) - 1
+    if numerator_h < 0 or numerator_w < 0:
+        raise RefBackendError(
+            "codegen pool2d requires output shape (N, C, H_out, W_out)"
+        )
+    out_h = numerator_h // stride_h + 1
+    out_w = numerator_w // stride_w + 1
+    return batch, channels, out_h, out_w
 
 
 def _conv1d_output_shape_from_shapes(
@@ -1813,6 +1861,60 @@ def _write_conv2d_kernel(
     return rendered.strip().splitlines()
 
 
+def _write_pool2d_kernel(
+    node_index: int,
+    op_spec: _OpSpec,
+    input_shape: Sequence[int],
+    output_shape: Sequence[int],
+    kernel_size: Tuple[int, int],
+    stride: Tuple[int, int],
+    padding: Tuple[int, int],
+    dilation: Tuple[int, int],
+    dtype: _CodegenDType,
+    ceil_mode: bool,
+    count_include_pad: bool,
+    divisor_override: int | None,
+) -> List[str]:
+    pool2d_template = _get_template_env().get_template("pool2d_kernel.c.j2")
+    batch, channels, in_h, in_w = input_shape
+    out_h, out_w = output_shape[2], output_shape[3]
+    k_h, k_w = kernel_size
+    stride_h, stride_w = stride
+    pad_h, pad_w = padding
+    dil_h, dil_w = dilation
+    input_suffix = _format_array_suffix(input_shape)
+    output_suffix = _format_array_suffix(output_shape)
+    signature = (
+        f"void node{node_index}_{op_spec.name}_{dtype.suffix}("
+        f"const {dtype.c_type} input{input_suffix}, "
+        f"{dtype.c_type} out{output_suffix}) {{"
+    )
+    rendered = pool2d_template.render(
+        signature=signature,
+        pool_kind=op_spec.name,
+        batch=batch,
+        channels=channels,
+        in_h=in_h,
+        in_w=in_w,
+        out_h=out_h,
+        out_w=out_w,
+        k_h=k_h,
+        k_w=k_w,
+        stride_h=stride_h,
+        stride_w=stride_w,
+        pad_h=pad_h,
+        pad_w=pad_w,
+        dil_h=dil_h,
+        dil_w=dil_w,
+        c_type=dtype.c_type,
+        ceil_mode=ceil_mode,
+        count_include_pad=count_include_pad,
+        divisor_override=divisor_override,
+        has_divisor_override=divisor_override is not None,
+    )
+    return rendered.strip().splitlines()
+
+
 def _write_conv1d_kernel(
     node_index: int,
     op_spec: _OpSpec,
@@ -1976,6 +2078,22 @@ def _write_generic_source(graph: _GenericGraph) -> str:
                 graph.strides[op_node.node],
                 op_node.concat_dim if op_node.concat_dim is not None else 0,
                 graph.dtype,
+            )
+        elif op_node.spec.kind == "pool2d":
+            input_node = op_node.inputs[0]
+            kernel_lines = _write_pool2d_kernel(
+                index,
+                op_node.spec,
+                graph.shapes[input_node],
+                op_node.output_shape,
+                op_node.pool2d_kernel_size or (1, 1),
+                op_node.pool2d_stride or (1, 1),
+                op_node.pool2d_padding or (0, 0),
+                op_node.pool2d_dilation or (1, 1),
+                graph.dtype,
+                op_node.pool2d_ceil_mode,
+                op_node.pool2d_count_include_pad,
+                op_node.pool2d_divisor_override,
             )
         elif op_node.spec.kind == "conv1d":
             input_node, weight_node, *bias_nodes = op_node.inputs
@@ -3062,6 +3180,114 @@ def _parse_conv1d_args(
     return (input_arg, weight_arg, bias, stride, padding, dilation, groups)
 
 
+def _parse_max_pool2d_args(
+    node: torch.fx.Node,
+) -> Tuple[torch.fx.Node, object, object, object, object, object]:
+    args = list(node.args)
+    kwargs = dict(node.kwargs)
+    if len(args) < 2 or len(args) > 6:
+        raise RefBackendError("codegen max_pool2d expects pooling arguments")
+    input_arg = args[0]
+    kernel_size = args[1]
+    stride = None
+    padding = 0
+    dilation = 1
+    ceil_mode = False
+    remaining = args[2:]
+    if len(remaining) >= 1:
+        stride = remaining[0]
+    if len(remaining) >= 2:
+        padding = remaining[1]
+    if len(remaining) >= 3:
+        dilation = remaining[2]
+    if len(remaining) >= 4:
+        ceil_mode = remaining[3]
+    if kwargs:
+        extra = set(kwargs) - {
+            "kernel_size",
+            "stride",
+            "padding",
+            "dilation",
+            "ceil_mode",
+        }
+        if extra:
+            raise RefBackendError(
+                f"codegen max_pool2d got unexpected kwargs: {sorted(extra)}"
+            )
+        if "kernel_size" in kwargs:
+            kernel_size = kwargs["kernel_size"]
+        if "stride" in kwargs:
+            stride = kwargs["stride"]
+        if "padding" in kwargs:
+            padding = kwargs["padding"]
+        if "dilation" in kwargs:
+            dilation = kwargs["dilation"]
+        if "ceil_mode" in kwargs:
+            ceil_mode = kwargs["ceil_mode"]
+    return input_arg, kernel_size, stride, padding, dilation, ceil_mode
+
+
+def _parse_avg_pool2d_args(
+    node: torch.fx.Node,
+) -> Tuple[torch.fx.Node, object, object, object, object, object, object]:
+    args = list(node.args)
+    kwargs = dict(node.kwargs)
+    if len(args) < 2 or len(args) > 7:
+        raise RefBackendError("codegen avg_pool2d expects pooling arguments")
+    input_arg = args[0]
+    kernel_size = args[1]
+    stride = None
+    padding = 0
+    ceil_mode = False
+    count_include_pad = False
+    divisor_override = None
+    remaining = args[2:]
+    if len(remaining) >= 1:
+        stride = remaining[0]
+    if len(remaining) >= 2:
+        padding = remaining[1]
+    if len(remaining) >= 3:
+        ceil_mode = remaining[2]
+    if len(remaining) >= 4:
+        count_include_pad = remaining[3]
+    if len(remaining) >= 5:
+        divisor_override = remaining[4]
+    if kwargs:
+        extra = set(kwargs) - {
+            "kernel_size",
+            "stride",
+            "padding",
+            "ceil_mode",
+            "count_include_pad",
+            "divisor_override",
+        }
+        if extra:
+            raise RefBackendError(
+                f"codegen avg_pool2d got unexpected kwargs: {sorted(extra)}"
+            )
+        if "kernel_size" in kwargs:
+            kernel_size = kwargs["kernel_size"]
+        if "stride" in kwargs:
+            stride = kwargs["stride"]
+        if "padding" in kwargs:
+            padding = kwargs["padding"]
+        if "ceil_mode" in kwargs:
+            ceil_mode = kwargs["ceil_mode"]
+        if "count_include_pad" in kwargs:
+            count_include_pad = kwargs["count_include_pad"]
+        if "divisor_override" in kwargs:
+            divisor_override = kwargs["divisor_override"]
+    return (
+        input_arg,
+        kernel_size,
+        stride,
+        padding,
+        ceil_mode,
+        count_include_pad,
+        divisor_override,
+    )
+
+
 def _handle_concat_node(
     node: torch.fx.Node,
     op_spec: _OpSpec,
@@ -3329,6 +3555,136 @@ def _handle_conv2d_node(
     )
 
 
+def _handle_pool2d_node(
+    node: torch.fx.Node,
+    op_spec: _OpSpec,
+    dtype_info: _CodegenDType,
+    shapes: Dict[torch.fx.Node, Tuple[int, ...]],
+    strides: Dict[torch.fx.Node, Tuple[int, ...]],
+    dtypes: Dict[torch.fx.Node, torch.dtype],
+) -> _OpNode:
+    if op_spec.name == "max_pool2d":
+        (
+            input_arg,
+            kernel_size,
+            stride,
+            padding,
+            dilation,
+            ceil_mode,
+        ) = _parse_max_pool2d_args(node)
+        count_include_pad = False
+        divisor_override = None
+    else:
+        (
+            input_arg,
+            kernel_size,
+            stride,
+            padding,
+            ceil_mode,
+            count_include_pad,
+            divisor_override,
+        ) = _parse_avg_pool2d_args(node)
+        dilation = 1
+    if not isinstance(input_arg, torch.fx.Node):
+        raise _error_expected_tensor(op_spec.name)
+    if input_arg not in shapes:
+        raise _error_expected_tensor(op_spec.name)
+    if dtype_info.torch_dtype is not torch.float32:
+        raise RefBackendError(
+            f"codegen {op_spec.name} supports only torch.float32 tensors"
+        )
+    if dtypes[input_arg] is not torch.float32:
+        raise RefBackendError(
+            f"codegen {op_spec.name} supports only torch.float32 tensors"
+        )
+    if isinstance(kernel_size, torch.fx.Node) or isinstance(
+        padding, torch.fx.Node
+    ) or isinstance(ceil_mode, torch.fx.Node):
+        raise RefBackendError(
+            f"codegen {op_spec.name} expects constant kernel, padding, and ceil_mode"
+        )
+    if stride is not None and isinstance(stride, torch.fx.Node):
+        raise RefBackendError(
+            f"codegen {op_spec.name} expects constant stride values"
+        )
+    if isinstance(dilation, torch.fx.Node):
+        raise RefBackendError(
+            f"codegen {op_spec.name} expects constant dilation values"
+        )
+    if isinstance(count_include_pad, torch.fx.Node) or isinstance(
+        divisor_override, torch.fx.Node
+    ):
+        raise RefBackendError(
+            f"codegen {op_spec.name} expects constant pooling options"
+        )
+    input_shape = shapes[input_arg]
+    if len(input_shape) != 4:
+        raise RefBackendError(
+            f"codegen {op_spec.name} requires 4D input tensors"
+        )
+    if not _is_contiguous(input_shape, strides[input_arg]):
+        raise RefBackendError(
+            f"codegen {op_spec.name} requires contiguous input tensors"
+        )
+    kernel_pair = _normalize_pool2d_param("kernel_size", kernel_size)
+    if stride is None:
+        stride_pair = kernel_pair
+    else:
+        stride_pair = _normalize_pool2d_param("stride", stride)
+    padding_pair = _normalize_pool2d_param("padding", padding)
+    dilation_pair = _normalize_pool2d_param("dilation", dilation)
+    if (
+        kernel_pair[0] <= 0
+        or kernel_pair[1] <= 0
+        or stride_pair[0] <= 0
+        or stride_pair[1] <= 0
+        or dilation_pair[0] <= 0
+        or dilation_pair[1] <= 0
+        or padding_pair[0] < 0
+        or padding_pair[1] < 0
+    ):
+        raise RefBackendError(
+            f"codegen {op_spec.name} expects positive kernel, stride, and dilation with non-negative padding"
+        )
+    if ceil_mode:
+        raise RefBackendError(
+            f"codegen {op_spec.name} does not support ceil_mode"
+        )
+    if not isinstance(count_include_pad, bool):
+        raise RefBackendError(
+            f"codegen {op_spec.name} expects count_include_pad to be a bool"
+        )
+    if divisor_override is not None:
+        if not isinstance(divisor_override, int) or divisor_override <= 0:
+            raise RefBackendError(
+                f"codegen {op_spec.name} expects divisor_override to be a positive int"
+            )
+    output_shape = _pool2d_output_shape_from_shapes(
+        input_shape,
+        kernel_pair,
+        stride_pair,
+        padding_pair,
+        dilation_pair,
+    )
+    shapes[node] = output_shape
+    dtypes[node] = dtype_info.torch_dtype
+    strides[node] = _contiguous_strides(output_shape)
+    return _OpNode(
+        node=node,
+        spec=op_spec,
+        inputs=(input_arg,),
+        output_shape=output_shape,
+        inplace_input=None,
+        pool2d_kernel_size=kernel_pair,
+        pool2d_stride=stride_pair,
+        pool2d_padding=padding_pair,
+        pool2d_dilation=dilation_pair,
+        pool2d_ceil_mode=bool(ceil_mode),
+        pool2d_count_include_pad=count_include_pad,
+        pool2d_divisor_override=divisor_override,
+    )
+
+
 def _handle_addmm_like_node(
     node: torch.fx.Node,
     op_spec: _OpSpec,
@@ -3472,6 +3828,13 @@ def _analyze_generic_graph(
             if op_spec.kind == "concat":
                 op_nodes.append(
                     _handle_concat_node(
+                        node, op_spec, dtype_info, shapes, strides, dtypes
+                    )
+                )
+                continue
+            if op_spec.kind == "pool2d":
+                op_nodes.append(
+                    _handle_pool2d_node(
                         node, op_spec, dtype_info, shapes, strides, dtypes
                     )
                 )

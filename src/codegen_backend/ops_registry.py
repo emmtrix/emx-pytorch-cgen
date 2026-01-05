@@ -22,6 +22,7 @@ _VALID_KINDS = {
     "matmul",
     "conv1d",
     "conv2d",
+    "pool2d",
 }
 
 
@@ -1326,6 +1327,16 @@ _REGISTRY.register_op("conv2d", kind="conv2d").targets(
 _REGISTRY.register_op("conv1d", kind="conv1d").targets(
     torch.ops.aten.conv1d.default,
     torch.ops.aten.conv1d,
+).build()
+_REGISTRY.register_op("avg_pool2d", kind="pool2d").targets(
+    F.avg_pool2d,
+    torch.ops.aten.avg_pool2d.default,
+    torch.ops.aten.avg_pool2d,
+).build()
+_REGISTRY.register_op("max_pool2d", kind="pool2d").targets(
+    F.max_pool2d,
+    torch.ops.aten.max_pool2d.default,
+    torch.ops.aten.max_pool2d,
 ).build()
 
 SUPPORTED_OPS = _REGISTRY.build()
