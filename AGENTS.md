@@ -2,7 +2,8 @@
 
 ## Tests
 
-Build the backend before running tests:
+Build the backend only when needed (for example, after changing C sources or
+backend build logic):
 
 ```bash
 PYTHONPATH=src python -m c_ref_backend.build
@@ -13,6 +14,8 @@ Run the test suite with:
 ```bash
 PYTHONPATH=src pytest -p no:terminal
 ```
+
+Documentation-only changes in `AGENTS.md` do not require rerunning tests.
 
 When reporting executed tests, include the test duration in your feedback.
 Do not emit test progress output when running tests.
