@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <stdbool.h>
 #include "ops_scalar_i32.h"
 
 void node1_mul_i32(const int32_t a[2][3], const int32_t b[2][3], int32_t out[2][3]) {

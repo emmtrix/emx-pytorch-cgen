@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <stdbool.h>
 #include "ops_scalar_f32.h"
 
 void node1_argmax_f32(const float a[2][3], int64_t out[2]) {

@@ -412,7 +412,7 @@ static inline float ref_scalar_f32_exp2(float a) {
 }
 
 static inline float ref_scalar_f32_frac(float a) {
-    return a - floorf(a);
+    return a - truncf(a);
 }
 
 static inline float ref_scalar_f32_i0(float x) {

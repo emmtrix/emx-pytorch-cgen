@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <stdbool.h>
 #include "ops_scalar_f32.h"
 
 void node1_where_f32(const uint8_t cond[1][3], const float a[1][3], const float b[1][3], float out[1][3]) {
