@@ -26,6 +26,9 @@
                             }
                         }
                     }
+                    {% if has_bias %}
+                    acc += bias[oc];
+                    {% endif %}
                     out[n][oc][oh][ow] = acc;
                 }
             }

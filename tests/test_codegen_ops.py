@@ -207,9 +207,6 @@ def _conv2d_sample_filter(sample):
     weight = args[0] if len(args) > 0 else sample.kwargs.get("weight")
     if not isinstance(weight, torch.Tensor):
         return False
-    bias = sample.kwargs.get("bias", args[1] if len(args) > 1 else None)
-    if bias is not None:
-        return False
     stride = sample.kwargs.get("stride", args[2] if len(args) > 2 else 1)
     padding = sample.kwargs.get("padding", args[3] if len(args) > 3 else 0)
     dilation = sample.kwargs.get("dilation", args[4] if len(args) > 4 else 1)
