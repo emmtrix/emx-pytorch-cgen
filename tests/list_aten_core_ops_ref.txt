@@ -585,7 +585,7 @@ atleast_1d                               -     -
 atleast_2d                               -     -      
 atleast_3d                               -     -      
 avg_pool1d                               -     -      
-avg_pool2d                               -     -      
+avg_pool2d                               -     yes    
 avg_pool2d_backward                      -     -      
 avg_pool3d                               -     -      
 avg_pool3d_backward                      -     -      
@@ -1164,7 +1164,7 @@ matrix_power                             -     -
 max                                      -     -      
 max_pool1d                               -     -      
 max_pool1d_with_indices                  -     -      
-max_pool2d                               -     -      
+max_pool2d                               -     yes    
 max_pool2d_backward                      -     -      
 max_pool2d_with_indices                  -     -      
 max_pool2d_with_indices_backward         -     -      
@@ -1718,8 +1718,8 @@ zfill                                    -     -
 Summary
 total aten ops: 1714
 supported by cref only: 5
-supported by codegen only: 149
+supported by codegen only: 151
 supported by both: 77
-unsupported by either: 1483
-supported by codegen: 226 / 1714 (13.2 %)
+unsupported by either: 1481
+supported by codegen: 228 / 1714 (13.3 %)
 supported by c-ref: 82 / 1714 (4.8 %)
