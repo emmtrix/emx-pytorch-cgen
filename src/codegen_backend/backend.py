@@ -137,6 +137,7 @@ class _OpNode:
     conv2d_padding: Tuple[int, int] | None = None
     conv2d_dilation: Tuple[int, int] | None = None
     conv2d_groups: int | None = None
+    conv2d_has_bias: bool = False
     addmm_alpha: float | None = None
     addmm_beta: float | None = None
     params: Dict[str, object] = field(default_factory=dict)
@@ -1567,6 +1568,7 @@ def _write_conv2d_kernel(
     dilation: Tuple[int, int],
     groups: int,
     dtype: _CodegenDType,
+    has_bias: bool,
 ) -> List[str]:
     conv2d_template = _get_template_env().get_template("conv2d_kernel.c.j2")
     batch, in_channels, in_h, in_w = input_shape
@@ -1578,10 +1580,14 @@ def _write_conv2d_kernel(
     input_suffix = _format_array_suffix(input_shape)
     weight_suffix = _format_array_suffix(weight_shape)
     output_suffix = _format_array_suffix(output_shape)
+    bias_arg = (
+        f"const {dtype.c_type} bias[{out_channels}], " if has_bias else ""
+    )
     signature = (
         f"void node{node_index}_{op_spec.name}_{dtype.suffix}("
         f"const {dtype.c_type} input{input_suffix}, "
         f"const {dtype.c_type} weight{weight_suffix}, "
+        f"{bias_arg}"
         f"{dtype.c_type} out{output_suffix}) {{"
     )
     rendered = conv2d_template.render(
@@ -1603,6 +1609,7 @@ def _write_conv2d_kernel(
         dil_w=dil_w,
         groups=groups,
         c_type=dtype.c_type,
+        has_bias=has_bias,
     )
     return rendered.strip().splitlines()
 
@@ -1698,7 +1705,7 @@ def _write_generic_source(graph: _GenericGraph) -> str:
                 graph.dtype,
             )
         elif op_node.spec.kind == "conv2d":
-            input_node, weight_node = op_node.inputs
+            input_node, weight_node, *bias_nodes = op_node.inputs
             kernel_lines = _write_conv2d_kernel(
                 index,
                 op_node.spec,
@@ -1710,6 +1717,7 @@ def _write_generic_source(graph: _GenericGraph) -> str:
                 op_node.conv2d_dilation or (1, 1),
                 op_node.conv2d_groups or 1,
                 graph.dtype,
+                op_node.conv2d_has_bias,
             )
         elif op_node.spec.kind == "addmm":
             input_node, mat1_node, mat2_node = op_node.inputs
@@ -2685,8 +2693,12 @@ def _handle_conv2d_node(
         weight_arg, torch.fx.Node
     ):
         raise _error_expected_tensor("conv2d")
-    if bias is not None or isinstance(bias, torch.fx.Node):
-        raise RefBackendError("codegen conv2d does not support bias")
+    bias_node = None
+    if bias is not None:
+        if isinstance(bias, torch.fx.Node):
+            bias_node = bias
+        else:
+            raise RefBackendError("codegen conv2d expects bias to be a tensor")
     if isinstance(stride, torch.fx.Node) or isinstance(
         padding, torch.fx.Node
     ) or isinstance(dilation, torch.fx.Node):
@@ -2709,8 +2721,21 @@ def _handle_conv2d_node(
         raise _error_expected_tensor("conv2d")
     if dtypes[input_arg] is not torch.float32 or dtypes[weight_arg] is not torch.float32:
         raise RefBackendError("codegen conv2d supports only torch.float32 tensors")
+    if bias_node is not None:
+        if bias_node not in shapes:
+            raise _error_expected_tensor("conv2d")
+        if dtypes[bias_node] is not torch.float32:
+            raise RefBackendError("codegen conv2d supports only torch.float32 tensors")
     input_shape = shapes[input_arg]
     weight_shape = shapes[weight_arg]
+    if bias_node is not None:
+        bias_shape = shapes[bias_node]
+        if len(bias_shape) != 1 or bias_shape[0] != weight_shape[0]:
+            raise RefBackendError(
+                "codegen conv2d expects bias shape to match output channels"
+            )
+        if not _is_contiguous(bias_shape, strides[bias_node]):
+            raise RefBackendError("codegen conv2d requires contiguous bias")
     if len(input_shape) != 4 or len(weight_shape) != 4:
         raise RefBackendError("codegen conv2d requires 4D input and weight tensors")
     if not _is_contiguous(input_shape, strides[input_arg]) or not _is_contiguous(
@@ -2744,16 +2769,20 @@ def _handle_conv2d_node(
     shapes[node] = output_shape
     dtypes[node] = dtype_info.torch_dtype
     strides[node] = _contiguous_strides(output_shape)
+    inputs = (input_arg, weight_arg)
+    if bias_node is not None:
+        inputs = (*inputs, bias_node)
     return _OpNode(
         node=node,
         spec=op_spec,
-        inputs=(input_arg, weight_arg),
+        inputs=inputs,
         output_shape=output_shape,
         inplace_input=None,
         conv2d_stride=stride_pair,
         conv2d_padding=padding_pair,
         conv2d_dilation=dilation_pair,
         conv2d_groups=groups,
+        conv2d_has_bias=bias_node is not None,
     )
 
 
