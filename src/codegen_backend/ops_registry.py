@@ -158,10 +158,13 @@ _REGISTRY.register_binary("add", symbol="+").targets(
     torch.ops.prims.add,
     torch.ops.prims.add.default,
     torch.ops.aten.add.Tensor,
+    torch.ops.aten.add.Scalar,
     torch.ops.aten.add_.Tensor,
+    torch.ops.aten.add_.Scalar,
     torch.ops.aten.add_,
 ).inplace(
     torch.ops.aten.add_.Tensor,
+    torch.ops.aten.add_.Scalar,
     torch.ops.aten.add_,
 ).build()
 _REGISTRY.register_binary("sub", symbol="-").targets(

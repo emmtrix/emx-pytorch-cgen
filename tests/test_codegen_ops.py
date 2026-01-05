@@ -295,6 +295,7 @@ CODEGEN_ATEN_OPS = [
     torch.ops.aten.acos.default,
     torch.ops.aten.acosh.default,
     torch.ops.aten.add.Tensor,
+    torch.ops.aten.add.Scalar,
     torch.ops.aten.all.default,
     torch.ops.aten.angle.default,
     torch.ops.aten.any.default,
@@ -574,6 +575,7 @@ ALIASED_CODEGEN_OPS = {
     torch.ops.aten.arcsin.default,
     torch.ops.aten.arcsinh.default,
     torch.ops.aten.arctan.default,
+    torch.ops.aten.add.Scalar,
 }
 CODEGEN_OPS_UNDER_TEST = [
     (aten_overload, _find_opinfo_for_overload(aten_overload))
@@ -585,6 +587,9 @@ CODEGEN_OP_TEST_CONFIG = {
     torch.ops.aten.add.Tensor: {
         "requires_same_shape": False,
         "sample_filter": _broadcastable_sample_filter,
+    },
+    torch.ops.aten.add.Scalar: {
+        "allow_non_tensor_args": True,
     },
     torch.ops.aten.amax.default: {
         "allow_kwargs": True,
@@ -867,6 +872,19 @@ class TestCodegenOpInfo(TestCase):
 
 
 class TestCodegenAliasedOps(TestCase):
+    def test_codegen_add_scalar_matches_eager(self):
+        aten_overload = torch.ops.aten.add.Scalar
+        compiled = _compile_codegen_op(aten_overload)
+        float_inputs = (torch.rand(2, 3, dtype=torch.float32), 3)
+        expected = aten_overload(*float_inputs)
+        result = compiled(*float_inputs)
+        torch.testing.assert_close(result, expected)
+
+        int_inputs = (torch.randint(0, 10, (2, 3), dtype=torch.int32), 3)
+        expected = aten_overload(*int_inputs)
+        result = compiled(*int_inputs)
+        torch.testing.assert_close(result, expected)
+
     def test_codegen_arccosh_matches_eager(self):
         aten_overload = torch.ops.aten.arccosh.default
         compiled = _compile_codegen_op(aten_overload)

@@ -1,4 +1,5 @@
 import hashlib
+import numbers
 import operator
 import subprocess
 import tempfile
@@ -125,6 +126,8 @@ class _OpNode:
     inputs: Tuple[torch.fx.Node, ...]
     output_shape: Tuple[int, ...]
     inplace_input: int | None = None
+    input_count: int = 0
+    scalar_literals: Dict[int, float | int | bool] = field(default_factory=dict)
     reduction_dims: Tuple[int, ...] | None = None
     keepdim: bool = False
     reduce_all: bool = False
@@ -143,6 +146,7 @@ class _OpNode:
 class _GenericGraph:
     placeholders: List[torch.fx.Node]
     tensor_placeholders: List[torch.fx.Node]
+    scalar_placeholders: List[torch.fx.Node]
     op_nodes: List[_OpNode]
     output_node: torch.fx.Node
     output_value: torch.fx.Node
@@ -359,6 +363,8 @@ def _is_integer_dtype(dtype: torch.dtype) -> bool:
 def _format_scalar_literal(value: float, dtype: _CodegenDType) -> str:
     if _is_integer_dtype(dtype.torch_dtype):
         return str(int(value))
+    if dtype.torch_dtype is torch.bool:
+        return "1" if bool(value) else "0"
     if dtype.torch_dtype is torch.float32:
         return f"{float(value)}f"
     raise RefBackendError(
@@ -373,19 +379,26 @@ def emit_signature(
     input_shapes: Sequence[Sequence[int]],
     input_dtypes: Sequence[torch.dtype],
     dtype: _CodegenDType,
+    scalar_literals: Dict[int, float | int | bool] | None = None,
 ) -> str:
     out_suffix = _format_array_suffix(output_shape)
     if op_spec.kind == "binary":
-        a_shape, b_shape = input_shapes
-        a_suffix = _format_array_suffix(a_shape)
-        b_suffix = _format_array_suffix(b_shape)
-        a_c_type = _input_c_type(input_dtypes[0], dtype)
-        b_c_type = _input_c_type(input_dtypes[1], dtype)
+        scalar_literals = scalar_literals or {}
+        params = []
+        name_iter = iter(("a", "b"))
+        for idx, (shape, input_dtype) in enumerate(zip(input_shapes, input_dtypes)):
+            if idx in scalar_literals:
+                continue
+            name = next(name_iter)
+            suffix = _format_array_suffix(shape)
+            c_type = _input_c_type(input_dtype, dtype)
+            params.append(f"const {c_type} {name}{suffix}")
+        params_str = ", ".join(params)
+        if params_str:
+            params_str = f"{params_str}, "
         return (
             f"void node{node_index}_{op_spec.name}_{dtype.suffix}("
-            f"const {a_c_type} a{a_suffix}, "
-            f"const {b_c_type} b{b_suffix}, "
-            f"{dtype.c_type} out{out_suffix}) {{"
+            f"{params_str}{dtype.c_type} out{out_suffix}) {{"
         )
     if op_spec.kind == "where":
         cond_shape, a_shape, b_shape = input_shapes
@@ -475,27 +488,33 @@ def emit_body(
     output_shape: Sequence[int],
     indent: str,
     dtype: _CodegenDType,
+    scalar_literals: Dict[int, float | int | bool] | None = None,
 ) -> List[str]:
     scalar_fn = f"{dtype.scalar_prefix}{op_spec.name}"
     if op_spec.kind == "binary":
-        a_shape, b_shape = input_shapes
-        a_strides, b_strides = input_strides
-        a_index_expr = emit_input_access(
-            "a",
-            a_shape,
-            a_strides,
-            output_shape,
-            broadcast_contiguous=True,
-            c_type=_input_c_type(input_dtypes[0], dtype),
-        )
-        b_index_expr = emit_input_access(
-            "b",
-            b_shape,
-            b_strides,
-            output_shape,
-            broadcast_contiguous=True,
-            c_type=_input_c_type(input_dtypes[1], dtype),
-        )
+        scalar_literals = scalar_literals or {}
+        name_iter = iter(("a", "b"))
+        param_names: Dict[int, str] = {}
+        for idx in range(len(input_shapes)):
+            if idx in scalar_literals:
+                continue
+            param_names[idx] = next(name_iter)
+
+        def _input_expr(idx: int) -> str:
+            if idx in scalar_literals:
+                return _format_scalar_literal(scalar_literals[idx], dtype)
+            name = param_names[idx]
+            return emit_input_access(
+                name,
+                input_shapes[idx],
+                input_strides[idx],
+                output_shape,
+                broadcast_contiguous=True,
+                c_type=_input_c_type(input_dtypes[idx], dtype),
+            )
+
+        a_index_expr = _input_expr(0)
+        b_index_expr = _input_expr(1)
         return [
             f"{indent}{output_access} = {scalar_fn}({a_index_expr}, {b_index_expr});"
         ]
@@ -557,10 +576,17 @@ def _write_elementwise_kernel(
     input_dtypes: Sequence[torch.dtype],
     output_strides: Sequence[int],
     dtype: _CodegenDType,
+    scalar_literals: Dict[int, float | int | bool] | None = None,
 ) -> List[str]:
     lines = [
         emit_signature(
-            node_index, op_spec, output_shape, input_shapes, input_dtypes, dtype
+            node_index,
+            op_spec,
+            output_shape,
+            input_shapes,
+            input_dtypes,
+            dtype,
+            scalar_literals=scalar_literals,
         )
     ]
     loop_lines, indent = emit_loops(output_shape)
@@ -578,6 +604,7 @@ def _write_elementwise_kernel(
             output_shape,
             indent,
             dtype,
+            scalar_literals=scalar_literals,
         )
     )
     lines.extend(emit_footer(output_shape, indent))
@@ -1544,9 +1571,21 @@ def _write_generic_source(graph: _GenericGraph) -> str:
     kernels: List[str] = []
     for index, op_node in enumerate(op_nodes, start=1):
         if op_node.spec.kind in {"binary", "unary", "where"}:
-            input_shapes = [graph.shapes[arg] for arg in op_node.inputs]
-            input_strides = [graph.strides[arg] for arg in op_node.inputs]
-            input_dtypes = [graph.dtypes[arg] for arg in op_node.inputs]
+            input_shapes = []
+            input_strides = []
+            input_dtypes = []
+            input_count = op_node.input_count or len(op_node.inputs)
+            input_nodes = iter(op_node.inputs)
+            for idx in range(input_count):
+                if idx in op_node.scalar_literals:
+                    input_shapes.append(())
+                    input_strides.append(())
+                    input_dtypes.append(graph.dtype.torch_dtype)
+                else:
+                    node = next(input_nodes)
+                    input_shapes.append(graph.shapes[node])
+                    input_strides.append(graph.strides[node])
+                    input_dtypes.append(graph.dtypes[node])
             output_strides = graph.strides[op_node.node]
             kernel_lines = _write_elementwise_kernel(
                 index,
@@ -1557,6 +1596,7 @@ def _write_generic_source(graph: _GenericGraph) -> str:
                 input_dtypes,
                 output_strides,
                 graph.dtype,
+                scalar_literals=op_node.scalar_literals,
             )
         elif op_node.spec.kind == "reduction":
             input_node = op_node.inputs[0]
@@ -2654,6 +2694,8 @@ def _analyze_generic_graph(
     output_node = None
     placeholders: List[torch.fx.Node] = []
     tensor_placeholders: List[torch.fx.Node] = []
+    scalar_placeholders: set[torch.fx.Node] = set()
+    placeholder_examples: Dict[torch.fx.Node, object] = {}
     op_nodes: List[_OpNode] = []
     shapes: Dict[torch.fx.Node, Tuple[int, ...]] = {}
     strides: Dict[torch.fx.Node, Tuple[int, ...]] = {}
@@ -2669,6 +2711,7 @@ def _analyze_generic_graph(
                     "codegen backend expects example inputs to match placeholder count"
                 ) from exc
             placeholders.append(node)
+            placeholder_examples[node] = example
             if isinstance(example, torch.Tensor):
                 if example.dtype not in _CODEGEN_DTYPES and example.numel() == 1:
                     continue
@@ -2772,17 +2815,38 @@ def _analyze_generic_graph(
                     )
             input_nodes: List[torch.fx.Node] = []
             input_shapes: List[Tuple[int, ...]] = []
+            scalar_literals: Dict[int, float | int | bool] = {}
             args_to_check = node.args
             if op_spec.kind in {"reduction", "arg_reduction"}:
                 args_to_check = node.args[:1]
-            for arg in args_to_check:
+            for idx, arg in enumerate(args_to_check):
                 if not isinstance(arg, torch.fx.Node):
+                    if op_spec.name == "add" and isinstance(arg, numbers.Number):
+                        scalar_literals[idx] = arg
+                        input_shapes.append(())
+                        continue
                     raise _error_expected_tensor(op_spec.name)
                 if arg not in shapes:
-                    raise _error_expected_tensor(op_spec.name)
+                    if op_spec.name == "add":
+                        example = placeholder_examples.get(arg, None)
+                        if isinstance(example, numbers.Number):
+                            shapes[arg] = ()
+                            strides[arg] = ()
+                            dtypes[arg] = dtype_info.torch_dtype
+                            scalar_placeholders.add(arg)
+                        else:
+                            raise _error_expected_tensor(op_spec.name)
+                    else:
+                        raise _error_expected_tensor(op_spec.name)
                 input_nodes.append(arg)
                 input_shapes.append(shapes[arg])
-            input_dtypes = [dtypes[arg] for arg in input_nodes]
+            input_dtypes = []
+            input_node_iter = iter(input_nodes)
+            for idx, shape in enumerate(input_shapes):
+                if idx in scalar_literals:
+                    input_dtypes.append(dtype_info.torch_dtype)
+                else:
+                    input_dtypes.append(dtypes[next(input_node_iter)])
             if op_spec.name in _BITWISE_OPS:
                 if dtype_info.torch_dtype in _INTEGER_CODEGEN_DTYPES:
                     pass
@@ -2864,6 +2928,8 @@ def _analyze_generic_graph(
                     inputs=tuple(input_nodes),
                     output_shape=output_shape,
                     inplace_input=inplace_input,
+                    input_count=len(args_to_check),
+                    scalar_literals=scalar_literals,
                     reduction_dims=reduction_dims,
                     keepdim=keepdim,
                     reduce_all=reduce_all,
@@ -2884,6 +2950,8 @@ def _analyze_generic_graph(
         raise RefBackendError(
             "codegen backend expects example inputs to match placeholder count"
         )
+
+    tensor_placeholders = [node for node in placeholders if node in shapes]
 
     if not op_nodes:
         raise RefBackendError("codegen backend requires at least one operation")
@@ -2908,6 +2976,7 @@ def _analyze_generic_graph(
     return _GenericGraph(
         placeholders=placeholders,
         tensor_placeholders=tensor_placeholders,
+        scalar_placeholders=list(scalar_placeholders),
         op_nodes=op_nodes,
         output_node=output_node,
         output_value=output_value,
@@ -3035,7 +3104,17 @@ def _compile_graph(
             env[node] = value
             if node in graph.tensor_placeholders:
                 if not isinstance(value, torch.Tensor):
-                    raise RefBackendError("codegen backend expects tensor inputs only")
+                    if node in graph.scalar_placeholders:
+                        value = torch.tensor(
+                            value,
+                            dtype=graph.dtypes[node],
+                            device="cpu",
+                        )
+                        env[node] = value
+                    else:
+                        raise RefBackendError(
+                            "codegen backend expects tensor inputs only"
+                        )
                 input_tensors.append(value)
         expected_dtypes = [graph.dtypes[node] for node in graph.tensor_placeholders]
         _validate_runtime_inputs(input_tensors, expected_dtypes, graph.dtype)
