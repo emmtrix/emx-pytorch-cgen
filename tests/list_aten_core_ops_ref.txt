@@ -677,7 +677,7 @@ conj_physical                            yes   yes
 conj_physical_                           -     yes    
 constant_pad_nd                          -     -      
 contiguous                               -     -      
-conv1d                                   -     -      
+conv1d                                   -     yes    
 conv2d                                   yes   yes    
 conv3d                                   -     -      
 conv_depthwise3d                         -     -      
