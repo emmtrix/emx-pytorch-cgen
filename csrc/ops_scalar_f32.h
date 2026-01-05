@@ -140,6 +140,18 @@ static inline float ref_scalar_f32_logaddexp(float a, float b) {
     return max_val + log1pf(expf(min_val - max_val));
 }
 
+static inline float ref_scalar_f32_logaddexp2(float a, float b) {
+    if (isnan(a) || isnan(b)) {
+        return NAN;
+    }
+    float max_val = fmaxf(a, b);
+    float min_val = fminf(a, b);
+    if (max_val == -INFINITY) {
+        return -INFINITY;
+    }
+    return max_val + log2f(1.0f + exp2f(min_val - max_val));
+}
+
 static inline float ref_scalar_f32_nextafter(float a, float b) {
     return nextafterf(a, b);
 }
@@ -228,6 +240,10 @@ static inline float ref_scalar_f32_acos(float a) {
     return acosf(a);
 }
 
+static inline float ref_scalar_f32_arccos(float a) {
+    return ref_scalar_f32_acos(a);
+}
+
 static inline float ref_scalar_f32_acosh(float a) {
     return acoshf(a);
 }
@@ -236,12 +252,24 @@ static inline float ref_scalar_f32_asin(float a) {
     return asinf(a);
 }
 
+static inline float ref_scalar_f32_arcsin(float a) {
+    return ref_scalar_f32_asin(a);
+}
+
 static inline float ref_scalar_f32_asinh(float a) {
     return asinhf(a);
 }
 
+static inline float ref_scalar_f32_arcsinh(float a) {
+    return ref_scalar_f32_asinh(a);
+}
+
 static inline float ref_scalar_f32_atan(float a) {
     return atanf(a);
+}
+
+static inline float ref_scalar_f32_arctan(float a) {
+    return ref_scalar_f32_atan(a);
 }
 
 static inline float ref_scalar_f32_atanh(float a) {

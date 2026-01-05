@@ -443,6 +443,11 @@ _REGISTRY.register_binary("logaddexp").targets(
     torch.ops.aten.logaddexp.default,
     torch.ops.aten.logaddexp,
 ).build()
+_REGISTRY.register_binary("logaddexp2").targets(
+    torch.logaddexp2,
+    torch.ops.aten.logaddexp2.default,
+    torch.ops.aten.logaddexp2,
+).build()
 _REGISTRY.register_binary("nextafter").targets(
     torch.nextafter,
     torch.ops.aten.nextafter.default,
@@ -609,6 +614,16 @@ _REGISTRY.register_unary("acos").targets(
     torch.ops.aten.acos_.default,
     torch.ops.aten.acos_,
 ).build()
+_REGISTRY.register_unary("arccos").targets(
+    torch.arccos,
+    torch.ops.aten.arccos.default,
+    torch.ops.aten.arccos,
+    torch.ops.aten.arccos_.default,
+    torch.ops.aten.arccos_,
+).inplace(
+    torch.ops.aten.arccos_.default,
+    torch.ops.aten.arccos_,
+).build()
 _REGISTRY.register_unary("acosh").targets(
     torch.acosh,
     torch.arccosh,
@@ -636,6 +651,16 @@ _REGISTRY.register_unary("asin").targets(
     torch.ops.aten.asin_.default,
     torch.ops.aten.asin_,
 ).build()
+_REGISTRY.register_unary("arcsin").targets(
+    torch.arcsin,
+    torch.ops.aten.arcsin.default,
+    torch.ops.aten.arcsin,
+    torch.ops.aten.arcsin_.default,
+    torch.ops.aten.arcsin_,
+).inplace(
+    torch.ops.aten.arcsin_.default,
+    torch.ops.aten.arcsin_,
+).build()
 _REGISTRY.register_unary("asinh").targets(
     torch.asinh,
     torch.ops.aten.asinh.default,
@@ -646,6 +671,16 @@ _REGISTRY.register_unary("asinh").targets(
     torch.ops.aten.asinh_.default,
     torch.ops.aten.asinh_,
 ).build()
+_REGISTRY.register_unary("arcsinh").targets(
+    torch.arcsinh,
+    torch.ops.aten.arcsinh.default,
+    torch.ops.aten.arcsinh,
+    torch.ops.aten.arcsinh_.default,
+    torch.ops.aten.arcsinh_,
+).inplace(
+    torch.ops.aten.arcsinh_.default,
+    torch.ops.aten.arcsinh_,
+).build()
 _REGISTRY.register_unary("atan").targets(
     torch.atan,
     torch.ops.aten.atan.default,
@@ -655,6 +690,16 @@ _REGISTRY.register_unary("atan").targets(
 ).inplace(
     torch.ops.aten.atan_.default,
     torch.ops.aten.atan_,
+).build()
+_REGISTRY.register_unary("arctan").targets(
+    torch.arctan,
+    torch.ops.aten.arctan.default,
+    torch.ops.aten.arctan,
+    torch.ops.aten.arctan_.default,
+    torch.ops.aten.arctan_,
+).inplace(
+    torch.ops.aten.arctan_.default,
+    torch.ops.aten.arctan_,
 ).build()
 _REGISTRY.register_unary("atanh").targets(
     torch.atanh,
