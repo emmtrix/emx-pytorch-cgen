@@ -52,19 +52,6 @@ def _update_sample(sample, updated_tensors):
     return SampleInput(new_input, args=tuple(new_args), kwargs=sample.kwargs)
 
 
-def _addmv_sample_filter(sample):
-    tensors = _extract_tensors(sample)
-    if len(tensors) != 3:
-        return False
-    input_tensor, mat, vec = tensors
-    if input_tensor.ndim != 1 or mat.ndim != 2 or vec.ndim != 1:
-        return False
-    if mat.shape[1] != vec.shape[0]:
-        return False
-    expected_shape = (mat.shape[0],)
-    return input_tensor.shape == expected_shape
-
-
 def _addr_sample_filter(sample):
     tensors = _extract_tensors(sample)
     if len(tensors) != 3:
@@ -1008,9 +995,6 @@ CODEGEN_OP_TEST_CONFIG = {
     torch.ops.aten.bitwise_right_shift_.Tensor: {
         "allowed_dtypes": (torch.int8, torch.int32),
     },
-    torch.ops.aten.logical_and.default: {
-        "allowed_dtypes": (torch.float32, torch.int8, torch.int32),
-    },
     torch.ops.aten.logical_or.default: {
         "allowed_dtypes": (torch.float32, torch.int8, torch.int32),
     },
@@ -1135,7 +1119,6 @@ CODEGEN_OP_TEST_CONFIG = {
     },
     torch.ops.aten.addmv.default: {
         "allowed_dtypes": (torch.float32,),
-        "sample_filter": _addmv_sample_filter,
     },
     torch.ops.aten.addr.default: {
         "equal_nan": True,

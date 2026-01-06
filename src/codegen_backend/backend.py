@@ -1397,6 +1397,7 @@ def _write_addmv_kernel(
     node_index: int,
     op_spec: _OpSpec,
     input_shape: Sequence[int],
+    output_shape: Sequence[int],
     mat_shape: Sequence[int],
     vec_shape: Sequence[int],
     input_strides: Sequence[int],
@@ -1412,14 +1413,23 @@ def _write_addmv_kernel(
     input_is_contiguous = _is_contiguous(input_shape, input_strides)
     mat_is_contiguous = _is_contiguous(mat_shape, mat_strides)
     vec_is_contiguous = _is_contiguous(vec_shape, vec_strides)
-    output_is_contiguous = _is_contiguous(input_shape, output_strides)
+    output_is_contiguous = _is_contiguous(output_shape, output_strides)
     acc_type = dtype.c_type
     acc_init = "0" if dtype.torch_dtype in _INTEGER_CODEGEN_DTYPES else "0.0f"
     m, n = mat_shape
     input_suffix = _format_array_suffix(input_shape)
     mat_suffix = _format_array_suffix(mat_shape)
     vec_suffix = _format_array_suffix(vec_shape)
-    out_suffix = _format_array_suffix(input_shape)
+    out_suffix = _format_array_suffix(output_shape)
+    broadcast_input = input_shape != output_shape
+    input_access = _emit_strided_access(
+        "input",
+        ("i",),
+        input_strides,
+        contig=input_is_contiguous and not broadcast_input,
+        sizes=input_shape,
+        c_type=dtype.c_type,
+    )
     rendered = addmv_template.render(
         signature=(
             f"void node{node_index}_{op_spec.name}_{dtype.suffix}("
@@ -1432,14 +1442,7 @@ def _write_addmv_kernel(
         n=n,
         acc_type=acc_type,
         acc_init=acc_init,
-        input_access=_emit_strided_access(
-            "input",
-            ("i",),
-            input_strides,
-            input_is_contiguous,
-            sizes=input_shape,
-            c_type=dtype.c_type,
-        ),
+        input_access=input_access,
         mat_access=_emit_strided_access(
             "mat",
             ("i", "t"),
@@ -1461,7 +1464,7 @@ def _write_addmv_kernel(
             ("i",),
             output_strides,
             output_is_contiguous,
-            sizes=input_shape,
+            sizes=output_shape,
             c_type=dtype.c_type,
         ),
         alpha=_format_scalar_literal(alpha, dtype),
@@ -2842,6 +2845,7 @@ def _write_generic_source(graph: _GenericGraph) -> str:
                 index,
                 op_node.spec,
                 graph.shapes[input_node],
+                graph.shapes[op_node.node],
                 graph.shapes[mat_node],
                 graph.shapes[vec_node],
                 graph.strides[input_node],
@@ -3080,16 +3084,16 @@ def _infer_output_shape(
         return expected_shape
     if op_spec.kind == "addmv":
         input_shape, mat_shape, vec_shape = input_shapes
-        if len(input_shape) != 1 or len(mat_shape) != 2 or len(vec_shape) != 1:
+        if len(input_shape) not in (0, 1) or len(mat_shape) != 2 or len(vec_shape) != 1:
             raise RefBackendError(
-                "codegen addmv expects 1D input and 2D matrix/1D vector"
+                "codegen addmv expects a scalar or 1D input and 2D matrix/1D vector"
             )
         if mat_shape[1] != vec_shape[0]:
             raise RefBackendError("codegen addmv requires inner dimensions to match")
         expected_shape = (mat_shape[0],)
-        if input_shape != expected_shape:
+        if _broadcast_output_shape(op_spec, input_shape, expected_shape) != expected_shape:
             raise RefBackendError(
-                "codegen addmv expects input shape to match mat-vec output"
+                "codegen addmv expects input shape to be broadcastable to mat-vec output"
             )
         return expected_shape
     if op_spec.kind == "addr":
