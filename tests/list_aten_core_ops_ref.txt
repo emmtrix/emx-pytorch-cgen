@@ -85,7 +85,7 @@ fmod.Scalar                              -     yes
 fmod.Tensor                              yes   yes    
 full                                     -     -      
 full_like                                -     yes    
-gather                                   -     -      
+gather                                   -     yes    
 ge.Scalar                                -     yes    
 ge.Tensor                                -     yes    
 gelu                                     -     yes    
