@@ -10,6 +10,7 @@ from codegen_backend.specs import _OpSpec, _binary_spec, _unary_spec
 _VALID_KINDS = {
     "binary",
     "unary",
+    "fill",
     "where",
     "flip",
     "arg_reduction",
@@ -1055,6 +1056,16 @@ _REGISTRY.register_unary("clone").targets(
     torch.clone,
     torch.ops.aten.clone.default,
     torch.ops.aten.clone,
+).build()
+_REGISTRY.register_op("fill", "fill").targets(
+    torch.ops.aten.fill.Scalar,
+    torch.ops.aten.fill,
+    torch.ops.aten.fill_.Scalar,
+    torch.ops.aten.fill_,
+).inplace(
+    torch.ops.aten.fill_.Scalar,
+    torch.ops.aten.fill_,
+    arg_index=0,
 ).build()
 _REGISTRY.register_unary("deg2rad").targets(
     torch.deg2rad,

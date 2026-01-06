@@ -1,5 +1,6 @@
 import hashlib
 import math
+import numbers
 import operator
 import subprocess
 import tempfile
@@ -563,6 +564,18 @@ def _format_scalar_literal(value: float, dtype: _CodegenDType) -> str:
     )
 
 
+def _normalize_scalar_value(op_name: str, value: object) -> float | int | bool:
+    if isinstance(value, torch.Tensor):
+        if value.numel() != 1:
+            raise RefBackendError(
+                f"codegen {op_name} expects a scalar value"
+            )
+        value = value.item()
+    if isinstance(value, numbers.Number):
+        return value
+    raise RefBackendError(f"codegen {op_name} expects a scalar value")
+
+
 def emit_signature(
     node_index: int,
     op_spec: _OpSpec,
@@ -850,6 +863,9 @@ def emit_body(
         return [
             f"{indent}{output_access} = ({cond_index_expr} != 0) ? {a_index_expr} : {b_index_expr};"
         ]
+    if op_spec.kind == "fill":
+        value = _format_scalar_literal(op_node.p("value"), dtype)
+        return [f"{indent}{output_access} = {value};"]
     a_shape = input_shapes[0]
     a_strides = input_strides[0]
     input_access = emit_input_access(
@@ -2328,7 +2344,7 @@ def _write_generic_source(graph: _GenericGraph) -> str:
     ]
     kernels: List[str] = []
     for index, op_node in enumerate(op_nodes, start=1):
-        if op_node.spec.kind in {"binary", "unary", "where"}:
+        if op_node.spec.kind in {"binary", "unary", "where", "fill"}:
             input_shapes = [graph.shapes[arg] for arg in op_node.inputs]
             input_strides = [graph.strides[arg] for arg in op_node.inputs]
             input_dtypes = [graph.dtypes[arg] for arg in op_node.inputs]
@@ -2752,6 +2768,8 @@ def _infer_output_shape(
     if op_spec.kind == "where":
         return _broadcast_output_shape(op_spec, *input_shapes)
     if op_spec.kind == "unary":
+        return input_shapes[0]
+    if op_spec.kind == "fill":
         return input_shapes[0]
     if op_spec.kind == "flip":
         return input_shapes[0]
@@ -5006,6 +5024,63 @@ def _handle_cumsum_node(
     )
 
 
+def _handle_fill_node(
+    node: torch.fx.Node,
+    op_spec: _OpSpec,
+    dtype_info: _CodegenDType,
+    shapes: Dict[torch.fx.Node, Tuple[int, ...]],
+    strides: Dict[torch.fx.Node, Tuple[int, ...]],
+    dtypes: Dict[torch.fx.Node, torch.dtype],
+    inplace_input: int | None,
+) -> _OpNode:
+    if not node.args:
+        raise RefBackendError(f"codegen {op_spec.name} expects inputs")
+    input_arg = node.args[0]
+    if not isinstance(input_arg, torch.fx.Node) or input_arg not in shapes:
+        raise _error_expected_tensor(op_spec.name)
+    value = None
+    if len(node.args) > 2:
+        raise RefBackendError(
+            f"codegen {op_spec.name} expects a tensor and scalar value"
+        )
+    if len(node.args) > 1:
+        value = node.args[1]
+    if "value" in node.kwargs:
+        if value is not None:
+            raise RefBackendError(
+                f"codegen {op_spec.name} expects a single scalar value"
+            )
+        value = node.kwargs["value"]
+    if node.kwargs and set(node.kwargs) != {"value"}:
+        raise RefBackendError(
+            f"codegen {op_spec.name} expects only 'value' as a keyword argument"
+        )
+    if value is None:
+        raise RefBackendError(
+            f"codegen {op_spec.name} expects a scalar value"
+        )
+    if dtypes[input_arg] is not dtype_info.torch_dtype:
+        raise RefBackendError(
+            f"codegen {op_spec.name} expects inputs to share the graph dtype"
+        )
+    scalar_value = _normalize_scalar_value(op_spec.name, value)
+    output_shape = shapes[input_arg]
+    shapes[node] = output_shape
+    dtypes[node] = dtype_info.torch_dtype
+    if inplace_input is not None:
+        strides[node] = strides[input_arg]
+    else:
+        strides[node] = _contiguous_strides(output_shape)
+    return _OpNode(
+        node=node,
+        spec=op_spec,
+        inputs=[input_arg],
+        output_shape=output_shape,
+        inplace_input=inplace_input,
+        params={"value": scalar_value},
+    )
+
+
 def _analyze_generic_graph(
     gm: torch.fx.GraphModule, example_inputs: Sequence[object]
 ) -> _GenericGraph:
@@ -5150,6 +5225,19 @@ def _analyze_generic_graph(
                 op_nodes.append(
                     _handle_embedding_node(
                         node, op_spec, dtype_info, shapes, strides, dtypes
+                    )
+                )
+                continue
+            elif op_spec.kind == "fill":
+                op_nodes.append(
+                    _handle_fill_node(
+                        node,
+                        op_spec,
+                        dtype_info,
+                        shapes,
+                        strides,
+                        dtypes,
+                        inplace_input,
                     )
                 )
                 continue
