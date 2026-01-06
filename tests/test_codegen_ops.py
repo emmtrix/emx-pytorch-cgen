@@ -65,6 +65,17 @@ def _addmv_sample_filter(sample):
     return input_tensor.shape == expected_shape
 
 
+def _addr_sample_filter(sample):
+    tensors = _extract_tensors(sample)
+    if len(tensors) != 3:
+        return False
+    input_tensor, vec1, vec2 = tensors
+    if input_tensor.ndim != 2 or vec1.ndim != 1 or vec2.ndim != 1:
+        return False
+    expected_shape = (vec1.shape[0], vec2.shape[0])
+    return input_tensor.shape == expected_shape
+
+
 def _all_same_shape(tensors):
     if not tensors:
         return True
@@ -137,6 +148,31 @@ def _var_dim_sample_filter(sample):
 
 def _norm_dim_sample_filter(sample):
     return len(sample.args) >= 2
+
+
+def _cumsum_sample_filter(sample):
+    if not isinstance(sample.input, torch.Tensor):
+        return False
+    dim = sample.args[0] if sample.args else sample.kwargs.get("dim")
+    dtype = None
+    if len(sample.args) > 1:
+        dtype = sample.args[1]
+    if "dtype" in sample.kwargs:
+        dtype = sample.kwargs["dtype"]
+    if not isinstance(dim, int):
+        return False
+    rank = sample.input.ndim
+    if rank == 0:
+        if dim not in (-1, 0):
+            return False
+    else:
+        if dim < 0:
+            dim += rank
+        if dim < 0 or dim >= rank:
+            return False
+    if dtype is not None and dtype is not sample.input.dtype:
+        return False
+    return True
 
 
 def _normalize_conv2d_param(value):
@@ -490,9 +526,12 @@ CODEGEN_ATEN_OPS = [
     torch.ops.aten.avg_pool2d.default,
     torch.ops.aten.cos.default,
     torch.ops.aten.cosh.default,
+    torch.ops.aten.cumsum.default,
     torch.ops.aten.deg2rad.default,
     torch.ops.aten.digamma.default,
+    torch.ops.aten.diagonal.default,
     torch.ops.aten.div.Tensor,
+    torch.ops.aten.embedding.default,
     torch.ops.aten.erf.default,
     torch.ops.aten.erfc.default,
     torch.ops.aten.erfinv.default,
@@ -732,6 +771,9 @@ CODEGEN_OPINFO_OVERRIDES = {
     torch.ops.aten.norm.ScalarOpt_dim: _lookup_opinfo("norm", ""),
     torch.ops.aten.softmax.int: _lookup_opinfo("softmax", ""),
     torch.ops.aten.log_softmax.int: _lookup_opinfo("log_softmax", ""),
+    torch.ops.aten.embedding.default: _lookup_opinfo(
+        "nn.functional.embedding", ""
+    ),
     torch.ops.aten.addmm.default: _lookup_opinfo("addmm", ""),
     torch.ops.aten.addbmm.default: _lookup_opinfo("addbmm", ""),
     torch.ops.aten.addmv.default: _lookup_opinfo("addmv", ""),
@@ -781,8 +823,18 @@ CODEGEN_OP_TEST_CONFIG = {
     torch.ops.aten.add.Tensor: {
         "requires_same_shape": False,
     },
+    torch.ops.aten.embedding.default: {
+        "allowed_dtypes": (torch.float32,),
+        "allow_non_tensor_args": True,
+        "allow_kwargs": True,
+    },
     torch.ops.aten.copysign.Tensor: {
         "allowed_dtypes": (torch.float32,),
+    },
+    torch.ops.aten.diagonal.default: {
+        "allow_non_tensor_args": True,
+        "allow_kwargs": True,
+        "requires_same_shape": False,
     },
     torch.ops.aten.amax.default: {
         "allow_kwargs": True,
@@ -962,6 +1014,13 @@ CODEGEN_OP_TEST_CONFIG = {
         "allow_kwargs": True,
         "requires_same_shape": False,
     },
+    torch.ops.aten.cumsum.default: {
+        "allowed_dtypes": (torch.float32, torch.int8, torch.int32),
+        "allow_non_tensor_args": True,
+        "allow_kwargs": True,
+        "requires_same_shape": False,
+        "sample_filter": _cumsum_sample_filter,
+    },
     torch.ops.aten.addmm.default: {
         "allowed_dtypes": (torch.float32,),
         "allow_non_tensor_args": True,
@@ -989,6 +1048,7 @@ CODEGEN_OP_TEST_CONFIG = {
         "allow_kwargs": True,
         "requires_same_shape": False,
         "equal_nan": True,
+        "sample_filter": _addr_sample_filter,
     },
 }
 DEFAULT_CONSTRAINTS = {

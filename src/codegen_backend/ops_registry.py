@@ -15,7 +15,9 @@ _VALID_KINDS = {
     "arg_reduction",
     "reduction",
     "softmax",
+    "cumsum",
     "concat",
+    "diagonal",
     "addmm",
     "addbmm",
     "addmv",
@@ -25,6 +27,7 @@ _VALID_KINDS = {
     "conv2d",
     "pool1d",
     "pool2d",
+    "embedding",
 }
 
 
@@ -558,6 +561,11 @@ _REGISTRY.register_unary("abs").targets(
 ).inplace(
     torch.ops.aten.abs_.default,
     torch.ops.aten.abs_,
+).build()
+_REGISTRY.register_op("cumsum", kind="cumsum").targets(
+    torch.cumsum,
+    torch.ops.aten.cumsum.default,
+    torch.ops.aten.cumsum,
 ).build()
 _REGISTRY.register_unary("absolute").targets(
     torch.absolute,
@@ -1270,6 +1278,16 @@ _REGISTRY.register_op("cat", kind="concat").targets(
     torch.cat,
     torch.ops.aten.cat.default,
     torch.ops.aten.cat,
+).build()
+_REGISTRY.register_op("embedding", kind="embedding").targets(
+    F.embedding,
+    torch.ops.aten.embedding.default,
+    torch.ops.aten.embedding,
+).build()
+_REGISTRY.register_op("diagonal", kind="diagonal").targets(
+    torch.diagonal,
+    torch.ops.aten.diagonal.default,
+    torch.ops.aten.diagonal,
 ).build()
 _REGISTRY.register_op("addmm", kind="addmm").targets(
     torch.addmm,
