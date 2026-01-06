@@ -25,8 +25,8 @@ alias                                    -     -
 amax                                     yes   yes    
 amin                                     yes   yes    
 any                                      -     yes    
-any.dim                                  -     -      
-any.dims                                 -     -      
+any.dim                                  -     yes    
+any.dims                                 -     yes    
 arange.start_step                        -     -      
 argmax                                   -     yes    
 argmin                                   -     yes    
@@ -196,8 +196,8 @@ where.self                               -     yes
 Summary
 total aten ops: 192
 supported by cref only: 0
-supported by codegen only: 64
+supported by codegen only: 66
 supported by both: 49
-unsupported by either: 79
-supported by codegen: 113 / 192 (58.9 %)
+unsupported by either: 77
+supported by codegen: 115 / 192 (59.9 %)
 supported by c-ref: 49 / 192 (25.5 %)

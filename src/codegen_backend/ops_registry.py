@@ -1318,6 +1318,8 @@ _REGISTRY.register_op("norm", kind="reduction").targets(
 _REGISTRY.register_op("any", kind="reduction").targets(
     torch.any,
     torch.ops.aten.any.default,
+    torch.ops.aten.any.dim,
+    torch.ops.aten.any.dims,
     torch.ops.aten.any,
 ).build()
 _REGISTRY.register_op("all", kind="reduction").targets(
