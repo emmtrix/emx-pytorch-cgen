@@ -1455,6 +1455,38 @@ class TestCodegenAdditionalOps(TestCase):
         result = compiled(*inputs)
         torch.testing.assert_close(result, expected)
 
+    def test_codegen_index_tensor_list_matches_eager(self):
+        def compiled_fn(
+            input_tensor: torch.Tensor,
+            idx0: torch.Tensor,
+            idx1: torch.Tensor,
+        ) -> torch.Tensor:
+            return torch.ops.aten.index.Tensor(input_tensor, [idx0, idx1])
+
+        compiled = torch.compile(compiled_fn, backend=codegen_generic_backend)
+        input_tensor = torch.arange(12, dtype=torch.float32).reshape(3, 4)
+        idx0 = torch.tensor([0, 2], dtype=torch.int64)
+        idx1 = torch.tensor([1, 3], dtype=torch.int64)
+        expected = torch.ops.aten.index.Tensor(input_tensor, [idx0, idx1])
+        result = compiled(input_tensor, idx0, idx1)
+        torch.testing.assert_close(result, expected)
+
+    def test_codegen_index_broadcast_matches_eager(self):
+        def compiled_fn(
+            input_tensor: torch.Tensor,
+            idx0: torch.Tensor,
+            idx1: torch.Tensor,
+        ) -> torch.Tensor:
+            return torch.ops.aten.index.Tensor(input_tensor, [idx0, idx1])
+
+        compiled = torch.compile(compiled_fn, backend=codegen_generic_backend)
+        input_tensor = torch.arange(24, dtype=torch.float32).reshape(2, 3, 4)
+        idx0 = torch.tensor([[0], [1]], dtype=torch.int64)
+        idx1 = torch.tensor([[0, 1, 2]], dtype=torch.int64)
+        expected = torch.ops.aten.index.Tensor(input_tensor, [idx0, idx1])
+        result = compiled(input_tensor, idx0, idx1)
+        torch.testing.assert_close(result, expected)
+
 
 class TestCodegenInplaceOps(TestCase):
     def test_codegen_backend_inplace_ops(self):

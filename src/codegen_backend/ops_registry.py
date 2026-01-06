@@ -30,6 +30,7 @@ _VALID_KINDS = {
     "pool1d",
     "pool2d",
     "embedding",
+    "index",
     "batch_norm",
     "pdist",
 }
@@ -1136,6 +1137,9 @@ _REGISTRY.register_op("as_strided", kind="view").targets(
 _REGISTRY.register_op("squeeze", kind="view").targets(
     torch.ops.aten.squeeze.dim,
     torch.ops.aten.squeeze.dims,
+).build()
+_REGISTRY.register_op("index", kind="index").targets(
+    torch.ops.aten.index.Tensor,
 ).build()
 _REGISTRY.register_unary("deg2rad").targets(
     torch.deg2rad,

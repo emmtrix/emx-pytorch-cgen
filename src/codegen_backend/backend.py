@@ -2250,6 +2250,88 @@ def _write_embedding_kernel(
     return rendered.splitlines()
 
 
+def _write_index_kernel(
+    node_index: int,
+    op_spec: _OpSpec,
+    input_shape: Sequence[int],
+    input_strides: Sequence[int],
+    index_shapes: Sequence[Sequence[int]],
+    index_strides: Sequence[Sequence[int]],
+    index_dtypes: Sequence[torch.dtype],
+    output_shape: Sequence[int],
+    output_strides: Sequence[int],
+    dtype: _CodegenDType,
+) -> List[str]:
+    input_suffix = _format_array_suffix(input_shape)
+    index_suffixes = [
+        _format_array_suffix(index_shape) for index_shape in index_shapes
+    ]
+    out_suffix = _format_array_suffix(output_shape)
+    index_arg_list = []
+    for idx, (index_suffix, index_dtype) in enumerate(
+        zip(index_suffixes, index_dtypes)
+    ):
+        index_c_type = _dtype_to_c_type(index_dtype, dtype)
+        index_arg_list.append(
+            f"const {index_c_type} indices{idx}{index_suffix}"
+        )
+    signature = (
+        f"void node{node_index}_{op_spec.name}_{dtype.suffix}("
+        f"const {dtype.c_type} input{input_suffix}, "
+        f"{', '.join(index_arg_list)}, "
+        f"{dtype.c_type} out{out_suffix}) {{"
+    )
+    loop_lines, indent = emit_loops(output_shape)
+    broadcast_rank = len(output_shape) - (len(input_shape) - len(index_shapes))
+    output_access = emit_output_access(
+        output_shape, output_strides, c_type=dtype.c_type
+    )
+    body_lines = []
+    for dim, (index_shape, index_stride, index_dtype) in enumerate(
+        zip(index_shapes, index_strides, index_dtypes)
+    ):
+        index_c_type = _dtype_to_c_type(index_dtype, dtype)
+        if index_shape:
+            offset = broadcast_rank - len(index_shape)
+            index_indices = []
+            for index_dim, size in enumerate(index_shape):
+                output_dim = index_dim + offset
+                if size == 1:
+                    index_indices.append("0")
+                else:
+                    index_indices.append(f"i{output_dim}")
+            index_access = _emit_strided_access(
+                f"indices{dim}",
+                index_indices,
+                index_stride,
+                _is_contiguous(index_shape, index_stride),
+                sizes=index_shape,
+                c_type=index_c_type,
+            )
+        else:
+            index_access = f"(({index_c_type}*)indices{dim})[0]"
+        body_lines.append(f"{indent}int64_t idx{dim} = (int64_t)({index_access});")
+        body_lines.append(
+            f"{indent}if (idx{dim} < 0) idx{dim} += {input_shape[dim]};"
+        )
+    remaining_rank = len(input_shape) - len(index_shapes)
+    input_indices = [f"idx{dim}" for dim in range(len(index_shapes))]
+    input_indices.extend(
+        f"i{broadcast_rank + dim}" for dim in range(remaining_rank)
+    )
+    input_access = _emit_strided_access(
+        "input",
+        input_indices,
+        input_strides,
+        _is_contiguous(input_shape, input_strides),
+        sizes=input_shape,
+        c_type=dtype.c_type,
+    )
+    body_lines.append(f"{indent}{output_access} = {input_access};")
+    footer_lines = emit_footer(output_shape, indent)
+    return [signature, *loop_lines, *body_lines, *footer_lines]
+
+
 def _write_conv2d_kernel(
     node_index: int,
     op_spec: _OpSpec,
@@ -2705,6 +2787,20 @@ def _write_generic_source(graph: _GenericGraph) -> str:
                 graph.dtypes[indices_node],
                 graph.dtype,
                 padding_idx=int(op_node.p("padding_idx", -1)),
+            )
+        elif op_node.spec.kind == "index":
+            input_node, *index_nodes = op_node.inputs
+            kernel_lines = _write_index_kernel(
+                index,
+                op_node.spec,
+                graph.shapes[input_node],
+                graph.strides[input_node],
+                [graph.shapes[node] for node in index_nodes],
+                [graph.strides[node] for node in index_nodes],
+                [graph.dtypes[node] for node in index_nodes],
+                op_node.output_shape,
+                graph.strides[op_node.node],
+                graph.dtype,
             )
         elif op_node.spec.kind == "concat":
             input_shapes = [graph.shapes[arg] for arg in op_node.inputs]
@@ -5713,6 +5809,61 @@ def _handle_embedding_node(
         params={"padding_idx": padding_idx},
     )
 
+
+def _handle_index_node(
+    node: torch.fx.Node,
+    op_spec: _OpSpec,
+    dtype_info: _CodegenDType,
+    shapes: Dict[torch.fx.Node, Tuple[int, ...]],
+    strides: Dict[torch.fx.Node, Tuple[int, ...]],
+    dtypes: Dict[torch.fx.Node, torch.dtype],
+) -> _OpNode:
+    if len(node.args) != 2:
+        raise RefBackendError("codegen index expects input and indices")
+    if node.kwargs:
+        raise RefBackendError("codegen index expects positional args only")
+    input_arg, indices_arg = node.args
+    if not isinstance(input_arg, torch.fx.Node) or input_arg not in shapes:
+        raise _error_expected_tensor(op_spec.name)
+    if dtypes[input_arg] is not dtype_info.torch_dtype:
+        raise RefBackendError(
+            "codegen index expects input to match the graph dtype"
+        )
+    if not isinstance(indices_arg, (list, tuple)) or not indices_arg:
+        raise RefBackendError("codegen index expects a non-empty indices list")
+    index_nodes: List[torch.fx.Node] = []
+    for index_node in indices_arg:
+        if index_node is None:
+            raise RefBackendError(
+                "codegen index expects tensor indices only"
+            )
+        if not isinstance(index_node, torch.fx.Node) or index_node not in shapes:
+            raise _error_expected_tensor(op_spec.name)
+        if dtypes[index_node] not in _EMBEDDING_INDEX_DTYPES:
+            raise RefBackendError(
+                "codegen index expects indices to have dtype torch.int32 or torch.int64"
+            )
+        index_nodes.append(index_node)
+    input_shape = shapes[input_arg]
+    if len(index_nodes) > len(input_shape):
+        raise RefBackendError(
+            "codegen index expects at most one index tensor per input dimension"
+        )
+    index_shapes = [shapes[index_node] for index_node in index_nodes]
+    broadcast_shape = _broadcast_output_shape(op_spec, *index_shapes)
+    output_shape = broadcast_shape + input_shape[len(index_nodes) :]
+    shapes[node] = output_shape
+    dtypes[node] = dtype_info.torch_dtype
+    strides[node] = _contiguous_strides(output_shape)
+    return _OpNode(
+        node=node,
+        spec=op_spec,
+        inputs=[input_arg, *index_nodes],
+        output_shape=output_shape,
+        inplace_input=None,
+    )
+
+
 def _handle_cumsum_node(
     node: torch.fx.Node,
     op_spec: _OpSpec,
@@ -6272,6 +6423,13 @@ def _analyze_generic_graph(
                     )
                 )
                 continue
+            elif op_spec.kind == "index":
+                op_nodes.append(
+                    _handle_index_node(
+                        node, op_spec, dtype_info, shapes, strides, dtypes
+                    )
+                )
+                continue
             elif op_spec.kind == "view":
                 op_nodes.append(
                     _handle_view_node(
@@ -6748,6 +6906,11 @@ def _validate_runtime_inputs(
             if tensor.dtype is not torch.bool:
                 raise RefBackendError(
                     "codegen backend expects boolean condition tensors"
+                )
+        elif expected_dtype in _EMBEDDING_INDEX_DTYPES:
+            if tensor.dtype is not expected_dtype:
+                raise RefBackendError(
+                    "codegen backend expects index tensors to match the captured dtype"
                 )
         elif tensor.dtype is not graph_dtype.torch_dtype:
             raise RefBackendError(
