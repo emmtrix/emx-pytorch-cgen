@@ -62,34 +62,6 @@ def _all_same_shape(tensors):
     return all(tensor.shape == shape for tensor in tensors[1:])
 
 
-def _broadcast_shapes(*shapes):
-    if not shapes:
-        return ()
-    max_len = max(len(shape) for shape in shapes)
-    output_shape = []
-    for dim in range(1, max_len + 1):
-        sizes = [
-            shape[-dim] if dim <= len(shape) else 1
-            for shape in shapes
-        ]
-        max_size = max(sizes)
-        if any(size not in (1, max_size) for size in sizes):
-            raise ValueError("shapes are not broadcastable")
-        output_shape.append(max_size)
-    return tuple(reversed(output_shape))
-
-
-def _broadcastable_sample_filter(sample):
-    tensors = _extract_tensors(sample)
-    if not tensors:
-        return False
-    try:
-        _broadcast_shapes(*(tensor.shape for tensor in tensors))
-    except ValueError:
-        return False
-    return True
-
-
 def _concat_sample_filter(sample):
     if not isinstance(sample.input, (list, tuple)):
         return False
@@ -1056,12 +1028,8 @@ CODEGEN_OP_TEST_CONFIG = {
     torch.ops.aten.clamp_.default: {
         "allowed_dtypes": (torch.float32, torch.int8, torch.int32),
     },
-    torch.ops.aten.where.self: {
-        "sample_filter": _broadcastable_sample_filter,
-    },
-    torch.ops.aten.where.Scalar: {
-        "sample_filter": _broadcastable_sample_filter,
-    },
+    torch.ops.aten.where.self: {},
+    torch.ops.aten.where.Scalar: {},
     torch.ops.aten.full_like.default: {
         "sample_filter": _full_like_sample_filter,
     },
