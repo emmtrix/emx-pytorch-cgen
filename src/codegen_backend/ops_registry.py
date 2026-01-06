@@ -1300,6 +1300,7 @@ _REGISTRY.register_op("mean", kind="reduction").targets(
     torch.mean,
     torch.ops.aten.mean.default,
     torch.ops.aten.mean,
+    torch.ops.aten.mean.dim,
 ).build()
 _REGISTRY.register_op("std", kind="reduction").targets(
     torch.std,

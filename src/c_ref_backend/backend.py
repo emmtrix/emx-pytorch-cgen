@@ -555,7 +555,9 @@ def _run_lgamma(a: torch.Tensor) -> torch.Tensor:
     return out
 
 
-def _run_logit(a: torch.Tensor) -> torch.Tensor:
+def _run_logit(a: torch.Tensor, eps: float | None = None) -> torch.Tensor:
+    if eps is not None:
+        return torch.logit(a, eps=eps)
     out = torch.empty_like(a, memory_format=torch.contiguous_format)
     run_logit(a, out)
     return out
@@ -1288,7 +1290,7 @@ def _compile_graph(
                         groups,
                     )
                 else:
-                    scalar_arg_ops = {"copysign", "pow"}
+                    scalar_arg_ops = {"copysign", "logit", "pow"}
                     args_values = []
                     for arg in node.args:
                         if not isinstance(arg, torch.fx.Node):
@@ -1297,7 +1299,13 @@ def _compile_graph(
                                 continue
                             raise RefBackendError(f"{op_name} expects tensor inputs only")
                         args_values.append(env[arg.name])
-                    if op_name in unary_ops:
+                    if op_name == "logit":
+                        if len(args_values) not in (1, 2):
+                            raise RefBackendError(
+                                "logit expects one input or (input, eps)"
+                            )
+                        result = op_fn(*args_values)
+                    elif op_name in unary_ops:
                         if len(args_values) != 1:
                             raise RefBackendError(f"{op_name} expects exactly one input")
                         result = op_fn(*args_values)

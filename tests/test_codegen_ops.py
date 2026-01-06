@@ -633,6 +633,7 @@ CODEGEN_ATEN_OPS = [
     torch.ops.aten.mul.Tensor,
     torch.ops.aten.mul.Scalar,
     torch.ops.aten.mean.default,
+    torch.ops.aten.mean.dim,
     torch.ops.aten.std.default,
     torch.ops.aten.var.dim,
     torch.ops.aten.norm.ScalarOpt_dim,
@@ -913,6 +914,7 @@ ALIASED_CODEGEN_OPS = {
     torch.ops.aten.arctan.default,
     torch.ops.aten.any.dim,
     torch.ops.aten.any.dims,
+    torch.ops.aten.mean.dim,
     torch.ops.aten.sum.dim_IntList,
 }
 CODEGEN_OPS_UNDER_TEST = [
