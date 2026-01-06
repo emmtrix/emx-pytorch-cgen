@@ -61,37 +61,6 @@ def _all_same_shape(tensors):
     shape = tensors[0].shape
     return all(tensor.shape == shape for tensor in tensors[1:])
 
-def _cumsum_sample_filter(sample):
-    if not isinstance(sample.input, torch.Tensor):
-        return False
-    dim = sample.args[0] if sample.args else sample.kwargs.get("dim")
-    dtype = None
-    if len(sample.args) > 1:
-        dtype = sample.args[1]
-    if "dtype" in sample.kwargs:
-        dtype = sample.kwargs["dtype"]
-    if not isinstance(dim, int):
-        return False
-    rank = sample.input.ndim
-    if rank == 0:
-        if dim not in (-1, 0):
-            return False
-    else:
-        if dim < 0:
-            dim += rank
-        if dim < 0 or dim >= rank:
-            return False
-    if dtype is not None and dtype is not sample.input.dtype:
-        return False
-    return True
-
-
-def _arange_sample_filter(sample):
-    dtype = sample.kwargs.get("dtype")
-    if dtype is None:
-        return False
-    return dtype in (torch.float32, torch.int8, torch.int32)
-
 
 def _as_strided_sample_filter(sample):
     if not isinstance(sample.input, torch.Tensor):
@@ -396,6 +365,13 @@ def _avg_pool2d_sample_filter(sample):
     return True
 
 
+def _native_batch_norm_legit_sample_filter(sample):
+    if len(sample.args) < 5:
+        return False
+    training = sample.args[4]
+    return training in (False, 0)
+
+
 def _sample_matches_constraints(sample, dtype, constraints):
     tensors = _extract_tensors(sample)
     if not tensors:
@@ -652,6 +628,7 @@ CODEGEN_ATEN_OPS = [
     torch.ops.aten._to_copy.default,
     torch.ops.aten.adaptive_avg_pool1d.default,
     torch.ops.aten._adaptive_avg_pool2d.default,
+    torch.ops.aten._adaptive_avg_pool2d_backward.default,
     torch.ops.aten._native_batch_norm_legit_no_training.default,
     torch.ops.aten._pdist_forward.default,
 ]
@@ -934,6 +911,7 @@ CODEGEN_SPECIAL_TEST_OPS = [
     torch.ops.aten._to_copy.default,
     torch.ops.aten.adaptive_avg_pool1d.default,
     torch.ops.aten._adaptive_avg_pool2d.default,
+    torch.ops.aten._adaptive_avg_pool2d_backward.default,
     torch.ops.aten._native_batch_norm_legit_no_training.default,
     torch.ops.aten._pdist_forward.default,
 ]
@@ -980,7 +958,6 @@ CODEGEN_OP_TEST_CONFIG = {
     torch.ops.aten.arange.start_step: {
         "allowed_dtypes": (torch.float32, torch.int8, torch.int32),
         "allow_no_tensor_inputs": True,
-        "sample_filter": _arange_sample_filter,
     },
     torch.ops.aten.as_strided.default: {
         "sample_filter": _as_strided_sample_filter,
@@ -1064,6 +1041,10 @@ CODEGEN_OP_TEST_CONFIG = {
         "allowed_dtypes": (torch.float32,),
         "sample_filter": _max_pool2d_sample_filter,
     },
+    torch.ops.aten._native_batch_norm_legit.default: {
+        "allowed_dtypes": (torch.float32,),
+        "sample_filter": _native_batch_norm_legit_sample_filter,
+    },
     torch.ops.aten.conv1d.default: {
         "allowed_dtypes": (torch.float32,),
     },
@@ -1072,7 +1053,6 @@ CODEGEN_OP_TEST_CONFIG = {
     },
     torch.ops.aten.cumsum.default: {
         "allowed_dtypes": (torch.float32, torch.int8, torch.int32),
-        "sample_filter": _cumsum_sample_filter,
     },
     torch.ops.aten.addmm.default: {
         "allowed_dtypes": (torch.float32,),
@@ -1243,6 +1223,23 @@ class TestCodegenOpInfo(TestCase):
                 compare_kwargs["rtol"] = constraints["rtol"] or 0.0
                 compare_kwargs["atol"] = constraints["atol"] or 0.0
             torch.testing.assert_close(result, expected, **compare_kwargs)
+
+
+class TestCodegenSpecialOps(TestCase):
+    def test_codegen_adaptive_avg_pool2d_backward(self):
+        grad_output = torch.randn(1, 2, 2, 2)
+        input_tensor = torch.randn(1, 2, 4, 4)
+        compiled = torch.compile(
+            lambda grad, inp: torch.ops.aten._adaptive_avg_pool2d_backward.default(
+                grad, inp
+            ),
+            backend=codegen_generic_backend,
+        )
+        expected = torch.ops.aten._adaptive_avg_pool2d_backward.default(
+            grad_output, input_tensor
+        )
+        result = compiled(grad_output, input_tensor)
+        torch.testing.assert_close(result, expected)
 
 
 instantiate_device_type_tests(TestCodegenOpInfo, globals(), only_for="cpu")
