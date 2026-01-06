@@ -7965,9 +7965,10 @@ def _compile_generic_library(graph: _GenericGraph) -> _GenericLibrary:
         extra_postargs=compile_args,
     )
     lib_name = "ref_codegen_generic"
+    entry_name = f"ref_codegen_main_{graph.dtype.suffix}"
     link_args: List[str] = []
     if compiler.compiler_type == "msvc":
-        link_args = ["/DLL"]
+        link_args = ["/DLL", f"/EXPORT:{entry_name}"]
     compiler.link_shared_lib(
         objects,
         lib_name,
@@ -7981,7 +7982,6 @@ def _compile_generic_library(graph: _GenericGraph) -> _GenericLibrary:
     lib = ctypes.CDLL(str(so_path))
     argtypes = [ctypes.c_void_p for _ in graph.tensor_placeholders]
     argtypes.append(ctypes.c_void_p)
-    entry_name = f"ref_codegen_main_{graph.dtype.suffix}"
     getattr(lib, entry_name).argtypes = argtypes
     getattr(lib, entry_name).restype = None
 
