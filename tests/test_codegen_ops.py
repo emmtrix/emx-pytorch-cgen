@@ -61,38 +61,6 @@ def _all_same_shape(tensors):
     shape = tensors[0].shape
     return all(tensor.shape == shape for tensor in tensors[1:])
 
-
-def _concat_sample_filter(sample):
-    if not isinstance(sample.input, (list, tuple)):
-        return False
-    tensors = _extract_tensors(sample)
-    if not tensors:
-        return False
-    dim = sample.kwargs.get("dim", 0)
-    if sample.args:
-        dim = sample.args[0]
-    if not isinstance(dim, int):
-        return False
-    rank = tensors[0].ndim
-    if rank == 0:
-        return False
-    if dim < 0:
-        dim += rank
-    if dim < 0 or dim >= rank:
-        return False
-    for tensor in tensors:
-        if tensor.ndim != rank:
-            return False
-    base_shape = tensors[0].shape
-    for tensor in tensors[1:]:
-        for dim_index, size in enumerate(tensor.shape):
-            if dim_index == dim:
-                continue
-            if size != base_shape[dim_index]:
-                return False
-    return True
-
-
 def _cumsum_sample_filter(sample):
     if not isinstance(sample.input, torch.Tensor):
         return False
