@@ -62,6 +62,40 @@ def _all_same_shape(tensors):
     return all(tensor.shape == shape for tensor in tensors[1:])
 
 
+def _cdist_sample_filter(sample):
+    if not isinstance(sample.input, torch.Tensor):
+        return False
+    if sample.args:
+        x2 = sample.args[0]
+    else:
+        x2 = sample.kwargs.get("x2")
+    if not isinstance(x2, torch.Tensor):
+        return False
+    if sample.input.ndim != 2 or x2.ndim != 2:
+        return False
+    if sample.input.shape[1] != x2.shape[1]:
+        return False
+    if not sample.input.is_contiguous() or not x2.is_contiguous():
+        return False
+    if len(sample.args) > 1:
+        p_value = sample.args[1]
+    else:
+        p_value = sample.kwargs.get("p", 2.0)
+    try:
+        p_value = float(p_value)
+    except (TypeError, ValueError):
+        return False
+    if p_value != 2.0:
+        return False
+    if len(sample.args) > 2:
+        compute_mode = sample.args[2]
+    else:
+        compute_mode = sample.kwargs.get("compute_mode")
+    if compute_mode not in (None, 0):
+        return False
+    return True
+
+
 def _normalize_conv2d_param(value):
     try:
         return normalize_int_or_pair("value", value)
@@ -130,44 +164,6 @@ def _convolution_sample_filter(sample):
     if sample.input.shape[1] != weight.shape[1] * groups:
         return False
     if weight.shape[0] % groups != 0:
-        return False
-    return True
-
-
-def _max_pool1d_sample_filter(sample):
-    if not isinstance(sample.input, torch.Tensor):
-        return False
-    if sample.input.ndim != 3:
-        return False
-    if not sample.input.is_contiguous():
-        return False
-    args = list(sample.args)
-    kernel_size = args[0] if len(args) > 0 else sample.kwargs.get("kernel_size")
-    stride = args[1] if len(args) > 1 else sample.kwargs.get("stride")
-    padding = args[2] if len(args) > 2 else sample.kwargs.get("padding", 0)
-    dilation = args[3] if len(args) > 3 else sample.kwargs.get("dilation", 1)
-    ceil_mode = args[4] if len(args) > 4 else sample.kwargs.get("ceil_mode", False)
-    kernel_value = _normalize_pool1d_param(kernel_size)
-    if kernel_value is None:
-        return False
-    if stride is None:
-        stride_value = kernel_value
-    else:
-        stride_value = _normalize_pool1d_param(stride)
-        if stride_value is None:
-            return False
-    padding_value = _normalize_pool1d_param(padding)
-    dilation_value = _normalize_pool1d_param(dilation)
-    if padding_value is None or dilation_value is None:
-        return False
-    if (
-        kernel_value <= 0
-        or stride_value <= 0
-        or dilation_value <= 0
-        or padding_value < 0
-    ):
-        return False
-    if ceil_mode:
         return False
     return True
 
@@ -530,6 +526,7 @@ CODEGEN_ATEN_OPS = [
     torch.ops.aten._adaptive_avg_pool2d_backward.default,
     torch.ops.aten._adaptive_avg_pool3d.default,
     torch.ops.aten._native_batch_norm_legit_no_training.default,
+    torch.ops.aten._cdist_forward.default,
     torch.ops.aten._pdist_forward.default,
 ]
 OPTIONAL_DEFAULT_ATEN_OPS: list[torch._ops.OpOverload] = []
@@ -814,6 +811,7 @@ CODEGEN_SPECIAL_TEST_OPS = [
     torch.ops.aten._adaptive_avg_pool2d_backward.default,
     torch.ops.aten._adaptive_avg_pool3d.default,
     torch.ops.aten._native_batch_norm_legit_no_training.default,
+    torch.ops.aten._cdist_forward.default,
     torch.ops.aten._pdist_forward.default,
 ]
 CODEGEN_OP_TEST_CONFIG = {
@@ -876,6 +874,12 @@ CODEGEN_OP_TEST_CONFIG = {
     torch.ops.aten.log_sigmoid.default: {
         "allowed_dtypes": (torch.float32,),
     },
+    torch.ops.aten._cdist_forward.default: {
+        "allowed_dtypes": (torch.float32,),
+        "allow_noncontiguous": False,
+        "requires_contiguous": True,
+        "sample_filter": _cdist_sample_filter,
+    },
     torch.ops.aten.gelu.default: {
         "allowed_dtypes": (torch.float32,),
     },
@@ -933,7 +937,6 @@ CODEGEN_OP_TEST_CONFIG = {
     },
     torch.ops.aten.max_pool1d.default: {
         "allowed_dtypes": (torch.float32,),
-        "sample_filter": _max_pool1d_sample_filter,
     },
     torch.ops.aten.max_pool2d.default: {
         "allowed_dtypes": (torch.float32,),
