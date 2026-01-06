@@ -62,47 +62,6 @@ def _all_same_shape(tensors):
     return all(tensor.shape == shape for tensor in tensors[1:])
 
 
-def _cdist_sample_filter(sample):
-    if not isinstance(sample.input, torch.Tensor):
-        return False
-    if sample.args:
-        x2 = sample.args[0]
-    else:
-        x2 = sample.kwargs.get("x2")
-    if not isinstance(x2, torch.Tensor):
-        return False
-    if sample.input.ndim != 2 or x2.ndim != 2:
-        return False
-    if sample.input.shape[1] != x2.shape[1]:
-        return False
-    if not sample.input.is_contiguous() or not x2.is_contiguous():
-        return False
-    if len(sample.args) > 1:
-        p_value = sample.args[1]
-    else:
-        p_value = sample.kwargs.get("p", 2.0)
-    try:
-        p_value = float(p_value)
-    except (TypeError, ValueError):
-        return False
-    if p_value != 2.0:
-        return False
-    if len(sample.args) > 2:
-        compute_mode = sample.args[2]
-    else:
-        compute_mode = sample.kwargs.get("compute_mode")
-    if compute_mode not in (None, 0):
-        return False
-    return True
-
-
-def _normalize_conv2d_param(value):
-    try:
-        return normalize_int_or_pair("value", value)
-    except ValueError:
-        return None
-
-
 def _normalize_pool2d_param(value):
     try:
         return normalize_int_or_pair("value", value)
@@ -926,7 +885,6 @@ CODEGEN_OP_TEST_CONFIG = {
     },
     torch.ops.aten.convolution.default: {
         "allowed_dtypes": (torch.float32,),
-        "sample_filter": _convolution_sample_filter,
     },
     torch.ops.aten.avg_pool1d.default: {
         "allowed_dtypes": (torch.float32,),
