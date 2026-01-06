@@ -1062,7 +1062,6 @@ CODEGEN_OP_TEST_CONFIG = {
     },
     torch.ops.aten.norm.ScalarOpt_dim: {
         "allowed_dtypes": (torch.float32,),
-        "sample_filter": _norm_dim_sample_filter,
     },
     torch.ops.aten.view.default: {
         "requires_contiguous": True,
