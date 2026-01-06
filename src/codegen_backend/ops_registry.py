@@ -1099,6 +1099,11 @@ _REGISTRY.register_unary("clone").targets(
     torch.ops.aten.clone.default,
     torch.ops.aten.clone,
 ).build()
+_REGISTRY.register_unary("resize_").targets(
+    torch.ops.aten.resize_.default,
+).inplace(
+    torch.ops.aten.resize_.default,
+).build()
 _REGISTRY.register_op("fill", "fill").targets(
     torch.ops.aten.fill.Scalar,
     torch.ops.aten.fill,
