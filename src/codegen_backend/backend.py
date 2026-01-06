@@ -490,6 +490,7 @@ def emit_signature(
     input_shapes: Sequence[Sequence[int]],
     input_dtypes: Sequence[torch.dtype],
     dtype: _CodegenDType,
+    params: Dict[str, object] | None = None,
 ) -> str:
     out_suffix = _format_array_suffix(output_shape)
     if op_spec.kind == "binary":
@@ -514,19 +515,31 @@ def emit_signature(
             f"{dtype.c_type} out{out_suffix}) {{"
         )
     if op_spec.kind == "where":
-        cond_shape, a_shape, b_shape = input_shapes
+        params = params or {}
+        input_index = 0
+        cond_shape = input_shapes[input_index]
         cond_suffix = _format_array_suffix(cond_shape)
-        a_suffix = _format_array_suffix(a_shape)
-        b_suffix = _format_array_suffix(b_shape)
-        cond_c_type = _input_c_type(input_dtypes[0], dtype)
-        a_c_type = _input_c_type(input_dtypes[1], dtype)
-        b_c_type = _input_c_type(input_dtypes[2], dtype)
+        cond_c_type = _input_c_type(input_dtypes[input_index], dtype)
+        input_index += 1
+        signature_parts = [
+            f"const {cond_c_type} cond{cond_suffix}",
+        ]
+        if "a_scalar" not in params:
+            a_shape = input_shapes[input_index]
+            a_suffix = _format_array_suffix(a_shape)
+            a_c_type = _input_c_type(input_dtypes[input_index], dtype)
+            signature_parts.append(f"const {a_c_type} a{a_suffix}")
+            input_index += 1
+        if "b_scalar" not in params:
+            b_shape = input_shapes[input_index]
+            b_suffix = _format_array_suffix(b_shape)
+            b_c_type = _input_c_type(input_dtypes[input_index], dtype)
+            signature_parts.append(f"const {b_c_type} b{b_suffix}")
+            input_index += 1
+        signature_parts.append(f"{dtype.c_type} out{out_suffix}")
         return (
             f"void node{node_index}_{op_spec.name}_{dtype.suffix}("
-            f"const {cond_c_type} cond{cond_suffix}, "
-            f"const {a_c_type} a{a_suffix}, "
-            f"const {b_c_type} b{b_suffix}, "
-            f"{dtype.c_type} out{out_suffix}) {{"
+            f"{', '.join(signature_parts)}) {{"
         )
     a_suffix = _format_array_suffix(input_shapes[0])
     a_c_type = _input_c_type(input_dtypes[0], dtype)
@@ -673,6 +686,7 @@ def _write_elementwise_kernel(
     elementwise_template = _get_template_env().get_template(
         "elementwise_kernel.c.j2"
     )
+    params = op_node.params
     signature = emit_signature(
         node_index,
         op_spec,
@@ -680,6 +694,7 @@ def _write_elementwise_kernel(
         input_shapes,
         input_dtypes,
         dtype,
+        params,
     )
     output_dims = [
         {"dim": dim, "size": size}
@@ -689,7 +704,6 @@ def _write_elementwise_kernel(
         output_shape, output_strides, c_type=dtype.c_type
     )
     scalar_fn = f"{dtype.scalar_prefix}{op_spec.name}"
-    params = op_node.params
     context: Dict[str, object] = {
         "signature": signature,
         "output_dims": output_dims,
@@ -743,32 +757,49 @@ def _write_elementwise_kernel(
                 c_type=_input_c_type(input_dtypes[1], dtype),
             )
     elif op_spec.kind == "where":
-        cond_shape, a_shape, b_shape = input_shapes
-        cond_strides, a_strides, b_strides = input_strides
+        input_index = 0
+        cond_shape = input_shapes[input_index]
+        cond_strides = input_strides[input_index]
         context["cond_access"] = emit_input_access(
             "cond",
             cond_shape,
             cond_strides,
             output_shape,
             broadcast_contiguous=True,
-            c_type=_input_c_type(input_dtypes[0], dtype),
+            c_type=_input_c_type(input_dtypes[input_index], dtype),
         )
-        context["a_access"] = emit_input_access(
-            "a",
-            a_shape,
-            a_strides,
-            output_shape,
-            broadcast_contiguous=True,
-            c_type=_input_c_type(input_dtypes[1], dtype),
-        )
-        context["b_access"] = emit_input_access(
-            "b",
-            b_shape,
-            b_strides,
-            output_shape,
-            broadcast_contiguous=True,
-            c_type=_input_c_type(input_dtypes[2], dtype),
-        )
+        input_index += 1
+        if "a_scalar" in params:
+            context["a_access"] = _format_scalar_literal(
+                params["a_scalar"], dtype
+            )
+        else:
+            a_shape = input_shapes[input_index]
+            a_strides = input_strides[input_index]
+            context["a_access"] = emit_input_access(
+                "a",
+                a_shape,
+                a_strides,
+                output_shape,
+                broadcast_contiguous=True,
+                c_type=_input_c_type(input_dtypes[input_index], dtype),
+            )
+            input_index += 1
+        if "b_scalar" in params:
+            context["b_access"] = _format_scalar_literal(
+                params["b_scalar"], dtype
+            )
+        else:
+            b_shape = input_shapes[input_index]
+            b_strides = input_strides[input_index]
+            context["b_access"] = emit_input_access(
+                "b",
+                b_shape,
+                b_strides,
+                output_shape,
+                broadcast_contiguous=True,
+                c_type=_input_c_type(input_dtypes[input_index], dtype),
+            )
     elif op_spec.kind == "fill":
         context["fill_value"] = _format_scalar_literal(
             op_node.p("value"), dtype
@@ -6409,6 +6440,47 @@ def _handle_resize_node(
     )
 
 
+def _parse_where_inputs(
+    op_spec: _OpSpec,
+    node: torch.fx.Node,
+    shapes: Dict[torch.fx.Node, Tuple[int, ...]],
+    scalar_values: Dict[torch.fx.Node, object],
+) -> Tuple[List[torch.fx.Node], List[Tuple[int, ...]], Dict[str, object]]:
+    if len(node.args) < 3:
+        raise RefBackendError(f"codegen {op_spec.name} expects three inputs")
+    cond_arg, a_arg, b_arg = node.args[:3]
+    input_nodes: List[torch.fx.Node] = []
+    input_shapes: List[Tuple[int, ...]] = []
+    params: Dict[str, object] = {}
+
+    def add_tensor_arg(arg: object) -> None:
+        if not isinstance(arg, torch.fx.Node):
+            raise _error_expected_tensor(op_spec.name)
+        if arg not in shapes:
+            raise _error_expected_tensor(op_spec.name)
+        input_nodes.append(arg)
+        input_shapes.append(shapes[arg])
+
+    def add_where_value(arg: object, scalar_key: str) -> None:
+        if isinstance(arg, torch.fx.Node):
+            if arg in shapes:
+                input_nodes.append(arg)
+                input_shapes.append(shapes[arg])
+                return
+            if arg in scalar_values:
+                params[scalar_key] = _normalize_scalar_value(
+                    op_spec.name, scalar_values[arg]
+                )
+                return
+            raise _error_expected_tensor(op_spec.name)
+        params[scalar_key] = _normalize_scalar_value(op_spec.name, arg)
+
+    add_tensor_arg(cond_arg)
+    add_where_value(a_arg, "a_scalar")
+    add_where_value(b_arg, "b_scalar")
+    return input_nodes, input_shapes, params
+
+
 def _analyze_generic_graph(
     gm: torch.fx.GraphModule, example_inputs: Sequence[object]
 ) -> _GenericGraph:
@@ -6956,13 +7028,23 @@ def _analyze_generic_graph(
                         args_to_check = node.args[:2]
                     else:
                         args_to_check = node.args
-                for arg in args_to_check:
-                    if not isinstance(arg, torch.fx.Node):
-                        raise _error_expected_tensor(op_spec.name)
-                    if arg not in shapes:
-                        raise _error_expected_tensor(op_spec.name)
-                    input_nodes.append(arg)
-                    input_shapes.append(shapes[arg])
+                if op_spec.kind == "where":
+                    (
+                        input_nodes,
+                        input_shapes,
+                        where_params,
+                    ) = _parse_where_inputs(
+                        op_spec, node, shapes, scalar_values
+                    )
+                    param_values.update(where_params)
+                else:
+                    for arg in args_to_check:
+                        if not isinstance(arg, torch.fx.Node):
+                            raise _error_expected_tensor(op_spec.name)
+                        if arg not in shapes:
+                            raise _error_expected_tensor(op_spec.name)
+                        input_nodes.append(arg)
+                        input_shapes.append(shapes[arg])
                 if out_arg is not None and out_arg not in input_nodes:
                     if not isinstance(out_arg, torch.fx.Node):
                         raise _error_expected_tensor(op_spec.name)
@@ -6975,6 +7057,11 @@ def _analyze_generic_graph(
                 for arg, shape in zip(input_nodes, input_shapes)
                 if out_arg is None or arg is not out_arg
             ]
+            if op_spec.kind == "where":
+                if "a_scalar" in param_values:
+                    shape_input_shapes.append(())
+                if "b_scalar" in param_values:
+                    shape_input_shapes.append(())
             input_dtypes = [dtypes[arg] for arg in input_nodes]
             if op_spec.name in _BITWISE_OPS:
                 if dtype_info.torch_dtype in _INTEGER_CODEGEN_DTYPES:
