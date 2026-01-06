@@ -319,6 +319,7 @@ class CumsumHandler(KindHandler):
             graph.dtypes[input_node],
             graph.dtypes[op_node.node],
             graph.dtype,
+            graph.dtypes[op_node.node],
         )
 
 

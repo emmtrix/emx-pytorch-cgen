@@ -3755,16 +3755,19 @@ def _write_cumsum_kernel(
     input_strides: Sequence[int],
     output_strides: Sequence[int],
     cumsum_dim: int,
-    input_dtype: torch.dtype,
-    output_dtype: torch.dtype,
     graph_dtype: _CodegenDType,
+    output_dtype: torch.dtype,
 ) -> List[str]:
-    input_c_type = _input_c_type(input_dtype, graph_dtype)
-    output_c_type = _dtype_to_c_type(output_dtype, graph_dtype)
+    output_dtype_info = _CODEGEN_DTYPES.get(output_dtype)
+    if output_dtype_info is None:
+        raise RefBackendError(
+            "codegen cumsum supports only torch.float32, torch.int8, or torch.int32"
+        )
+    input_c_type = _input_c_type(graph_dtype.torch_dtype, graph_dtype)
     signature = (
         f"void node{node_index}_{op_spec.name}_{graph_dtype.suffix}("
         f"const {input_c_type} input{_format_array_suffix(input_shape)}, "
-        f"{output_c_type} out{_format_array_suffix(input_shape)}) {{"
+        f"{output_dtype_info.c_type} out{_format_array_suffix(input_shape)}) {{"
     )
     lines = [signature]
     if not input_shape:
@@ -3779,10 +3782,12 @@ def _write_cumsum_kernel(
         output_strides,
         _is_contiguous(input_shape, output_strides),
         sizes=input_shape,
-        c_type=output_c_type,
+        c_type=output_dtype_info.c_type,
     )
-    acc_init = "0" if output_dtype in _INTEGER_CODEGEN_DTYPES else "0.0f"
-    lines.append(f"{indent}{output_c_type} acc = {acc_init};")
+    acc_init = (
+        "0" if output_dtype in _INTEGER_CODEGEN_DTYPES else "0.0f"
+    )
+    lines.append(f"{indent}{output_dtype_info.c_type} acc = {acc_init};")
     lines.append(
         f"{indent}for (int64_t r{cumsum_dim} = 0; r{cumsum_dim} <= i{cumsum_dim}; ++r{cumsum_dim}) {{"
     )
@@ -5855,11 +5860,9 @@ def _handle_cumsum_node(
         op_spec.name, node, shapes[input_arg]
     )
     output_dtype = dtype_override or dtype_info.torch_dtype
-    if output_dtype is torch.bool:
-        raise RefBackendError("codegen cumsum does not support torch.bool tensors")
     if output_dtype not in _CODEGEN_DTYPES:
         raise RefBackendError(
-            "codegen cumsum supports only torch.float32, torch.int8, or torch.int32"
+            f"codegen {op_spec.name} expects dtype to be torch.float32, torch.int8, or torch.int32"
         )
     output_shape = shapes[input_arg]
     shapes[node] = output_shape
