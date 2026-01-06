@@ -49,9 +49,18 @@ def _core_ops_from_native_functions(path: Path) -> Set[str]:
     return ops
 
 
+def _expand_op_names(op_names: Iterable[str]) -> Set[str]:
+    expanded: set[str] = set()
+    for name in op_names:
+        expanded.add(name)
+        if "." in name:
+            expanded.add(name.split(".", 1)[0])
+    return expanded
+
+
 def _ops_from_backend_source(path: Path) -> Set[str]:
-    pattern = re.compile(r"torch\.ops\.aten\.([A-Za-z0-9_]+)")
-    return set(pattern.findall(path.read_text(encoding="utf-8")))
+    pattern = re.compile(r"torch\.ops\.aten\.([A-Za-z0-9_.]+)")
+    return _expand_op_names(pattern.findall(path.read_text(encoding="utf-8")))
 
 
 def _attribute_chain(node: ast.AST) -> list[str] | None:
@@ -71,7 +80,7 @@ def _extract_aten_op_name(node: ast.AST, name_aliases: dict[str, str]) -> str | 
     if not parts:
         return None
     if len(parts) >= 4 and parts[:3] == ["torch", "ops", "aten"]:
-        return parts[3]
+        return ".".join(parts[3:])
     if len(parts) >= 2 and parts[0] in name_aliases:
         return name_aliases[parts[0]]
     return None
@@ -133,7 +142,7 @@ def _ops_from_codegen_tests(path: Path) -> Set[str]:
                 op_name = _extract_aten_op_name(node.args[0], aliases)
                 if op_name:
                     ops.add(op_name)
-    return ops
+    return _expand_op_names(ops)
 
 
 def _format_row(op_name: str, cref_supported: bool, codegen_supported: bool) -> str:
