@@ -539,6 +539,7 @@ CODEGEN_ATEN_OPS = [
     torch.ops.aten.exp.default,
     torch.ops.aten.exp2.default,
     torch.ops.aten.expm1.default,
+    torch.ops.aten.fill.Scalar,
     torch.ops.aten.flip.default,
     torch.ops.aten.floor.default,
     torch.ops.aten.floor_divide.default,
@@ -678,6 +679,7 @@ INPLACE_ATEN_OPS = [
     torch.ops.aten.exp_.default,
     torch.ops.aten.exp2_.default,
     torch.ops.aten.expm1_.default,
+    torch.ops.aten.fill_.Scalar,
     torch.ops.aten.floor_.default,
     torch.ops.aten.floor_divide_.Tensor,
     torch.ops.aten.fmod_.Tensor,
@@ -892,6 +894,10 @@ CODEGEN_OP_TEST_CONFIG = {
     },
     torch.ops.aten.log_sigmoid.default: {
         "allowed_dtypes": (torch.float32,),
+    },
+    torch.ops.aten.fill.Scalar: {
+        "allow_non_tensor_args": True,
+        "allow_kwargs": True,
     },
     torch.ops.aten.flip.default: {
         "allow_non_tensor_args": True,
