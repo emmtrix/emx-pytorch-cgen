@@ -144,6 +144,44 @@ def _contiguous_strides(shape: Sequence[int]) -> Tuple[int, ...]:
     return tuple(strides)
 
 
+def _channels_last_strides(shape: Sequence[int]) -> Tuple[int, ...]:
+    if len(shape) != 4:
+        raise RefBackendError("required rank 4 tensor to use channels_last format")
+    batch, channels, height, width = (
+        max(shape[0], 1),
+        max(shape[1], 1),
+        max(shape[2], 1),
+        max(shape[3], 1),
+    )
+    return (
+        height * width * channels,
+        1,
+        width * channels,
+        channels,
+    )
+
+
+def _channels_last_3d_strides(shape: Sequence[int]) -> Tuple[int, ...]:
+    if len(shape) != 5:
+        raise RefBackendError(
+            "required rank 5 tensor to use channels_last_3d format"
+        )
+    batch, channels, depth, height, width = (
+        max(shape[0], 1),
+        max(shape[1], 1),
+        max(shape[2], 1),
+        max(shape[3], 1),
+        max(shape[4], 1),
+    )
+    return (
+        depth * height * width * channels,
+        1,
+        height * width * channels,
+        width * channels,
+        channels,
+    )
+
+
 def _is_contiguous(shape: Sequence[int], strides: Sequence[int]) -> bool:
     expected = _contiguous_strides(shape)
     return all(
@@ -1036,6 +1074,67 @@ def _write_view_kernel(
         offset_expr = "0"
     if storage_offset:
         offset_expr = f"{storage_offset} + {offset_expr}"
+    lines.append(f"{indent}int64_t offset = {offset_expr};")
+    output_access = emit_output_access(
+        output_shape, output_strides, c_type=dtype.c_type
+    )
+    lines.append(f"{indent}{output_access} = a_ptr[offset];")
+    lines.extend(emit_footer(output_shape, indent))
+    return lines
+
+
+def _write_resize_kernel(
+    node_index: int,
+    op_node: _OpNode,
+    input_shape: Sequence[int],
+    input_strides: Sequence[int],
+    input_dtype: torch.dtype,
+    output_shape: Sequence[int],
+    output_strides: Sequence[int],
+    dtype: _CodegenDType,
+) -> List[str]:
+    input_suffix = _format_array_suffix(input_shape)
+    output_suffix = _format_array_suffix(output_shape)
+    input_c_type = _input_c_type(input_dtype, dtype)
+    signature = (
+        f"void node{node_index}_{op_node.spec.name}_{dtype.suffix}("
+        f"const {input_c_type} a{input_suffix}, "
+        f"{dtype.c_type} out{output_suffix}) {{"
+    )
+    lines = [signature]
+    lines.append(f"    const {input_c_type}* a_ptr = (const {input_c_type}*)a;")
+    loop_lines, indent = emit_loops(output_shape)
+    lines.extend(loop_lines)
+    output_contig_strides = _contiguous_strides(output_shape)
+    if output_contig_strides:
+        linear_terms = [
+            f"i{dim} * {stride}"
+            for dim, stride in enumerate(output_contig_strides)
+        ]
+        linear_expr = " + ".join(linear_terms)
+    else:
+        linear_expr = "0"
+    lines.append(f"{indent}int64_t linear = {linear_expr};")
+    if input_shape:
+        lines.append(f"{indent}int64_t remaining = linear;")
+        index_vars = []
+        for dim in range(len(input_shape) - 1, -1, -1):
+            size = input_shape[dim]
+            index_name = f"idx{dim}"
+            lines.append(
+                f"{indent}int64_t {index_name} = remaining % {size};"
+            )
+            if dim != 0:
+                lines.append(f"{indent}remaining /= {size};")
+            index_vars.append(index_name)
+        index_vars.reverse()
+        offset_terms = [
+            f"{index_vars[dim]} * {stride}"
+            for dim, stride in enumerate(input_strides)
+        ]
+        offset_expr = " + ".join(offset_terms) if offset_terms else "0"
+    else:
+        offset_expr = "0"
     lines.append(f"{indent}int64_t offset = {offset_expr};")
     output_access = emit_output_access(
         output_shape, output_strides, c_type=dtype.c_type
@@ -6401,14 +6500,13 @@ def _handle_resize_node(
     dtypes: Dict[torch.fx.Node, torch.dtype],
     inplace_input: int | None,
 ) -> _OpNode:
+    memory_format = None
     if node.kwargs:
-        if (
-            set(node.kwargs) != {"memory_format"}
-            or node.kwargs["memory_format"] is not None
-        ):
+        if set(node.kwargs) != {"memory_format"}:
             raise RefBackendError(
-                "codegen resize_ supports only memory_format=None"
+                "codegen resize_ expects only memory_format as a keyword argument"
             )
+        memory_format = node.kwargs.get("memory_format")
     if len(node.args) != 2:
         raise RefBackendError("codegen resize_ expects input and size arguments")
     input_arg, size_arg = node.args
@@ -6421,23 +6519,32 @@ def _handle_resize_node(
             "codegen resize_ expects inputs to share the graph dtype"
         )
     size = _parse_resize_size(op_spec.name, size_arg)
-    input_shape = shapes[input_arg]
-    if size != input_shape:
+    if any(dim < 0 for dim in size):
         raise RefBackendError(
-            "codegen resize_ supports only size values that match the input shape"
+            "codegen resize_ expects size values to be non-negative"
         )
-    shapes[node] = input_shape
+    input_shape = shapes[input_arg]
+    if math.prod(size) != math.prod(input_shape):
+        raise RefBackendError(
+            "codegen resize_ expects size to match the input numel"
+        )
+    shapes[node] = size
     dtypes[node] = dtype_info.torch_dtype
-    if inplace_input is not None:
-        strides[node] = strides[input_arg]
+    if memory_format is None or memory_format is torch.contiguous_format:
+        output_strides = _contiguous_strides(size)
+    elif memory_format is torch.channels_last:
+        output_strides = _channels_last_strides(size)
+    elif memory_format is torch.channels_last_3d:
+        output_strides = _channels_last_3d_strides(size)
     else:
-        strides[node] = _contiguous_strides(input_shape)
+        raise RefBackendError("Unsupported memory formatPreserve")
+    strides[node] = output_strides
     return _OpNode(
         node=node,
         spec=op_spec,
         inputs=[input_arg],
-        output_shape=input_shape,
-        inplace_input=inplace_input,
+        output_shape=size,
+        inplace_input=None,
     )
 
 
