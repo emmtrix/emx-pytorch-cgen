@@ -31,8 +31,10 @@ _VALID_KINDS = {
     "pool1d",
     "pool2d",
     "embedding",
+    "gather",
     "batch_norm",
     "pdist",
+    "col2im",
 }
 
 
@@ -1393,6 +1395,11 @@ _REGISTRY.register_op("embedding", kind="embedding").targets(
     torch.ops.aten.embedding.default,
     torch.ops.aten.embedding,
 ).build()
+_REGISTRY.register_op("gather", kind="gather").targets(
+    torch.gather,
+    torch.ops.aten.gather.default,
+    torch.ops.aten.gather,
+).build()
 _REGISTRY.register_op("diagonal", kind="diagonal").targets(
     torch.diagonal,
     torch.ops.aten.diagonal.default,
@@ -1464,6 +1471,10 @@ _REGISTRY.register_op("conv2d", kind="conv2d").targets(
 _REGISTRY.register_op("conv1d", kind="conv1d").targets(
     torch.ops.aten.conv1d.default,
     torch.ops.aten.conv1d,
+).build()
+_REGISTRY.register_op("col2im", kind="col2im").targets(
+    torch.ops.aten.col2im.default,
+    torch.ops.aten.col2im,
 ).build()
 _REGISTRY.register_op("avg_pool1d", kind="pool1d").targets(
     F.avg_pool1d,

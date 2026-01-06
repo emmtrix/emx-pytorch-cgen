@@ -52,19 +52,6 @@ def _update_sample(sample, updated_tensors):
     return SampleInput(new_input, args=tuple(new_args), kwargs=sample.kwargs)
 
 
-def _addmv_sample_filter(sample):
-    tensors = _extract_tensors(sample)
-    if len(tensors) != 3:
-        return False
-    input_tensor, mat, vec = tensors
-    if input_tensor.ndim != 1 or mat.ndim != 2 or vec.ndim != 1:
-        return False
-    if mat.shape[1] != vec.shape[0]:
-        return False
-    expected_shape = (mat.shape[0],)
-    return input_tensor.shape == expected_shape
-
-
 def _addr_sample_filter(sample):
     tensors = _extract_tensors(sample)
     if len(tensors) != 3:
@@ -589,6 +576,7 @@ CODEGEN_ATEN_OPS = [
     torch.ops.aten.asinh.default,
     torch.ops.aten.atan.default,
     torch.ops.aten.atan2.default,
+    torch.ops.aten.atan2.out,
     torch.ops.aten.atanh.default,
     torch.ops.aten.arccos.default,
     torch.ops.aten.arcsin.default,
@@ -646,6 +634,7 @@ CODEGEN_ATEN_OPS = [
     torch.ops.aten.fmod.Scalar,
     torch.ops.aten.frac.default,
     torch.ops.aten.full_like.default,
+    torch.ops.aten.gather.default,
     torch.ops.aten.heaviside.default,
     torch.ops.aten.hypot.default,
     torch.ops.aten.i0.default,
@@ -756,6 +745,7 @@ CODEGEN_ATEN_OPS = [
 CODEGEN_EXTRA_ATEN_OPS = [
     torch.ops.aten._log_softmax.default,
     torch.ops.aten.alias.default,
+    torch.ops.aten.col2im.default,
     torch.ops.aten.copy.default,
     torch.ops.aten.div.Tensor_mode,
     torch.ops.aten.div.Scalar_mode,
@@ -987,6 +977,7 @@ ALIASED_CODEGEN_OPS = {
     torch.ops.aten.arcsin.default,
     torch.ops.aten.arcsinh.default,
     torch.ops.aten.arctan.default,
+    torch.ops.aten.atan2.out,
     torch.ops.aten.any.dim,
     torch.ops.aten.any.dims,
     torch.ops.aten.mean.dim,
@@ -1022,9 +1013,6 @@ CODEGEN_OP_TEST_CONFIG = {
     },
     torch.ops.aten.bitwise_right_shift_.Tensor: {
         "allowed_dtypes": (torch.int8, torch.int32),
-    },
-    torch.ops.aten.logical_and.default: {
-        "allowed_dtypes": (torch.float32, torch.int8, torch.int32),
     },
     torch.ops.aten.logical_or.default: {
         "allowed_dtypes": (torch.float32, torch.int8, torch.int32),
@@ -1098,7 +1086,6 @@ CODEGEN_OP_TEST_CONFIG = {
     },
     torch.ops.aten.norm.ScalarOpt_dim: {
         "allowed_dtypes": (torch.float32,),
-        "sample_filter": _norm_dim_sample_filter,
     },
     torch.ops.aten.view.default: {
         "requires_contiguous": True,
@@ -1155,7 +1142,6 @@ CODEGEN_OP_TEST_CONFIG = {
     },
     torch.ops.aten.addmv.default: {
         "allowed_dtypes": (torch.float32,),
-        "sample_filter": _addmv_sample_filter,
     },
     torch.ops.aten.addr.default: {
         "equal_nan": True,
@@ -1349,6 +1335,25 @@ class TestCodegenAliasedOps(TestCase):
             result = compiled(*inputs)
             torch.testing.assert_close(result, expected)
 
+    def test_codegen_atan2_out_matches_eager(self):
+        aten_overload = torch.ops.aten.atan2.out
+
+        def compiled_fn(
+            lhs: torch.Tensor, rhs: torch.Tensor, out: torch.Tensor
+        ) -> torch.Tensor:
+            return aten_overload(lhs, rhs, out=out)
+
+        compiled = torch.compile(compiled_fn, backend=codegen_generic_backend)
+        lhs = torch.randn(2, 3, dtype=torch.float32)
+        rhs = torch.randn(2, 3, dtype=torch.float32)
+        expected_out = torch.empty_like(lhs)
+        expected = aten_overload(lhs, rhs, out=expected_out)
+        result_out = torch.empty_like(lhs)
+        result = compiled(lhs, rhs, out=result_out)
+        torch.testing.assert_close(result, expected)
+        torch.testing.assert_close(result_out, expected_out)
+        assert result is result_out
+
     def test_codegen_aliases_match_eager(self):
         aliased_ops = [
             torch.ops.aten.absolute.default,
@@ -1428,6 +1433,51 @@ class TestCodegenAdditionalOps(TestCase):
         result = compiled(*inputs)
         torch.testing.assert_close(result, expected)
 
+    def test_codegen_col2im_matches_eager(self):
+        aten_overload = torch.ops.aten.col2im.default
+        compiled = _compile_codegen_op(aten_overload)
+        output_size = (4, 4)
+        kernel_size = (2, 2)
+        dilation = (1, 1)
+        padding = (0, 0)
+        stride = (1, 1)
+        batched_input = torch.randn(1, 12, 9, dtype=torch.float32)
+        expected = aten_overload(
+            batched_input,
+            output_size,
+            kernel_size,
+            dilation,
+            padding,
+            stride,
+        )
+        result = compiled(
+            batched_input,
+            output_size,
+            kernel_size,
+            dilation,
+            padding,
+            stride,
+        )
+        torch.testing.assert_close(result, expected)
+        unbatched_input = torch.randn(12, 9, dtype=torch.float32)
+        expected = aten_overload(
+            unbatched_input,
+            output_size,
+            kernel_size,
+            dilation,
+            padding,
+            stride,
+        )
+        result = compiled(
+            unbatched_input,
+            output_size,
+            kernel_size,
+            dilation,
+            padding,
+            stride,
+        )
+        torch.testing.assert_close(result, expected)
+
     def test_codegen_native_batch_norm_no_training_matches_eager(self):
         def compiled_fn(
             input_tensor: torch.Tensor,
@@ -1475,6 +1525,49 @@ class TestCodegenAdditionalOps(TestCase):
         expected = aten_overload(*inputs)
         result = compiled(*inputs)
         torch.testing.assert_close(result, expected)
+
+    def test_codegen_gather_matches_eager(self):
+        aten_overload = torch.ops.aten.gather.default
+        compiled = _compile_codegen_op(aten_overload)
+        input_tensor = torch.arange(24, dtype=torch.float32).reshape(3, 4, 2)
+        test_cases = [
+            (
+                0,
+                torch.tensor(
+                    [
+                        [[0, 1], [2, 0], [1, 2], [0, 1]],
+                        [[2, 0], [1, 2], [0, 1], [2, 0]],
+                    ],
+                    dtype=torch.int64,
+                ),
+            ),
+            (
+                1,
+                torch.tensor(
+                    [
+                        [[0, 1], [2, 3]],
+                        [[3, 0], [1, 2]],
+                        [[2, 1], [0, 3]],
+                    ],
+                    dtype=torch.int32,
+                ),
+            ),
+            (
+                2,
+                torch.tensor(
+                    [
+                        [[0, 1, 0], [1, 0, 1], [0, 1, 0], [1, 0, 1]],
+                        [[1, 0, 1], [0, 1, 0], [1, 0, 1], [0, 1, 0]],
+                        [[0, 1, 0], [1, 0, 1], [0, 1, 0], [1, 0, 1]],
+                    ],
+                    dtype=torch.int64,
+                ),
+            ),
+        ]
+        for dim, index in test_cases:
+            expected = aten_overload(input_tensor, dim, index)
+            result = compiled(input_tensor, dim, index)
+            torch.testing.assert_close(result, expected)
 
 
 class TestCodegenInplaceOps(TestCase):

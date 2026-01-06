@@ -35,7 +35,7 @@ asin                                     yes   yes
 asinh                                    yes   yes    
 atan                                     yes   yes    
 atan2                                    yes   yes    
-atan2.out                                -     -      
+atan2.out                                -     yes    
 atanh                                    yes   yes    
 avg_pool1d                               -     yes    
 avg_pool2d                               -     yes    
@@ -54,7 +54,7 @@ ceil                                     yes   yes
 clamp                                    -     yes    
 clamp.Tensor                             -     -      
 clone                                    -     yes    
-col2im                                   -     -      
+col2im                                   -     yes    
 constant_pad_nd                          -     -      
 convolution                              yes   yes    
 convolution_backward                     -     -      
@@ -85,7 +85,7 @@ fmod.Scalar                              -     yes
 fmod.Tensor                              yes   yes    
 full                                     -     -      
 full_like                                -     yes    
-gather                                   -     -      
+gather                                   -     yes    
 ge.Scalar                                -     yes    
 ge.Tensor                                -     yes    
 gelu                                     -     yes    
