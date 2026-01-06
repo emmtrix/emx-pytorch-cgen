@@ -306,6 +306,7 @@ def _pool1d_output_shape_from_shapes(
     stride: int,
     padding: int,
     dilation: int,
+    ceil_mode: bool,
 ) -> Tuple[int, int, int]:
     batch, channels, in_l = input_shape
     numerator = in_l + 2 * padding - dilation * (kernel_size - 1) - 1
@@ -313,7 +314,12 @@ def _pool1d_output_shape_from_shapes(
         raise RefBackendError(
             "codegen pool1d requires output shape (N, C, L_out)"
         )
-    out_l = numerator // stride + 1
+    if ceil_mode:
+        out_l = (numerator + stride - 1) // stride + 1
+        if (out_l - 1) * stride >= in_l + padding:
+            out_l -= 1
+    else:
+        out_l = numerator // stride + 1
     return batch, channels, out_l
 
 
@@ -5222,7 +5228,7 @@ def _handle_pool1d_node(
         raise RefBackendError(
             f"codegen {op_spec.name} expects positive kernel, stride, and dilation with non-negative padding"
         )
-    if ceil_mode:
+    if ceil_mode and op_spec.name != "max_pool1d":
         raise RefBackendError(
             f"codegen {op_spec.name} does not support ceil_mode"
         )
@@ -5241,6 +5247,7 @@ def _handle_pool1d_node(
         stride_value,
         padding_value,
         dilation_value,
+        bool(ceil_mode),
     )
     shapes[node] = output_shape
     dtypes[node] = dtype_info.torch_dtype
