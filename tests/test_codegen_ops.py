@@ -390,6 +390,13 @@ def _avg_pool2d_sample_filter(sample):
     return True
 
 
+def _native_batch_norm_legit_sample_filter(sample):
+    if len(sample.args) < 5:
+        return False
+    training = sample.args[4]
+    return training in (False, 0)
+
+
 def _sample_matches_constraints(sample, dtype, constraints):
     tensors = _extract_tensors(sample)
     if not tensors:
@@ -646,6 +653,7 @@ CODEGEN_ATEN_OPS = [
     torch.ops.aten._to_copy.default,
     torch.ops.aten.adaptive_avg_pool1d.default,
     torch.ops.aten._adaptive_avg_pool2d.default,
+    torch.ops.aten._adaptive_avg_pool2d_backward.default,
     torch.ops.aten._native_batch_norm_legit_no_training.default,
     torch.ops.aten._pdist_forward.default,
 ]
@@ -928,6 +936,7 @@ CODEGEN_SPECIAL_TEST_OPS = [
     torch.ops.aten._to_copy.default,
     torch.ops.aten.adaptive_avg_pool1d.default,
     torch.ops.aten._adaptive_avg_pool2d.default,
+    torch.ops.aten._adaptive_avg_pool2d_backward.default,
     torch.ops.aten._native_batch_norm_legit_no_training.default,
     torch.ops.aten._pdist_forward.default,
 ]
@@ -1059,6 +1068,10 @@ CODEGEN_OP_TEST_CONFIG = {
     torch.ops.aten.max_pool2d.default: {
         "allowed_dtypes": (torch.float32,),
         "sample_filter": _max_pool2d_sample_filter,
+    },
+    torch.ops.aten._native_batch_norm_legit.default: {
+        "allowed_dtypes": (torch.float32,),
+        "sample_filter": _native_batch_norm_legit_sample_filter,
     },
     torch.ops.aten.conv1d.default: {
         "allowed_dtypes": (torch.float32,),
@@ -1238,6 +1251,23 @@ class TestCodegenOpInfo(TestCase):
                 compare_kwargs["rtol"] = constraints["rtol"] or 0.0
                 compare_kwargs["atol"] = constraints["atol"] or 0.0
             torch.testing.assert_close(result, expected, **compare_kwargs)
+
+
+class TestCodegenSpecialOps(TestCase):
+    def test_codegen_adaptive_avg_pool2d_backward(self):
+        grad_output = torch.randn(1, 2, 2, 2)
+        input_tensor = torch.randn(1, 2, 4, 4)
+        compiled = torch.compile(
+            lambda grad, inp: torch.ops.aten._adaptive_avg_pool2d_backward.default(
+                grad, inp
+            ),
+            backend=codegen_generic_backend,
+        )
+        expected = torch.ops.aten._adaptive_avg_pool2d_backward.default(
+            grad_output, input_tensor
+        )
+        result = compiled(grad_output, input_tensor)
+        torch.testing.assert_close(result, expected)
 
 
 instantiate_device_type_tests(TestCodegenOpInfo, globals(), only_for="cpu")
