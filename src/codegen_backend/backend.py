@@ -3,6 +3,7 @@ import math
 import numbers
 import operator
 import tempfile
+from fractions import Fraction
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -6149,32 +6150,68 @@ def _parse_arange_dtype(
     op_name: str,
     dtype: torch.dtype | None,
     dtype_info: _CodegenDType | None,
+    start: float | int | bool,
+    end: float | int | bool,
+    step: float | int | bool,
 ) -> _CodegenDType:
     if dtype is None:
-        if dtype_info is not None:
-            dtype = dtype_info.torch_dtype
-        else:
+        if any(
+            not isinstance(value, numbers.Integral)
+            for value in (start, end, step)
+        ):
             dtype = torch.get_default_dtype()
+        else:
+            dtype = torch.int32
     if dtype is torch.bool:
         raise RefBackendError(
             f"codegen {op_name} supports only numeric dtypes"
         )
     dtype_spec = _CODEGEN_DTYPES.get(dtype)
     if dtype_spec is None:
-        raise RefBackendError(
-            f"codegen {op_name} supports only torch.float32, torch.int8, or torch.int32"
+        supported = ", ".join(
+            f"torch.{supported_dtype.name}"
+            for supported_dtype in _CODEGEN_DTYPES
+            if supported_dtype is not torch.bool
         )
-    if dtype_info is not None and dtype_spec.torch_dtype is not dtype_info.torch_dtype:
+        raise RefBackendError(
+            f"codegen {op_name} supports only {supported}"
+        )
+    if (
+        dtype_info is not None
+        and dtype_spec.torch_dtype is not dtype_info.torch_dtype
+    ):
         raise RefBackendError(
             f"codegen {op_name} expects dtype to match the graph dtype"
         )
     return dtype_spec
 
 
-def _compute_arange_size(start: float, end: float, step: float) -> int:
+def _compute_arange_size(
+    start: float | int | bool,
+    end: float | int | bool,
+    step: float | int | bool,
+) -> int:
     if step == 0:
         raise RefBackendError("codegen arange expects step to be non-zero")
-    delta = (end - start) / step
+    if all(
+        isinstance(value, numbers.Integral) for value in (start, end, step)
+    ):
+        start_value = int(start)
+        end_value = int(end)
+        step_value = int(step)
+        if step_value == 0:
+            raise RefBackendError("codegen arange expects step to be non-zero")
+        if step_value > 0 and end_value <= start_value:
+            return 0
+        if step_value < 0 and end_value >= start_value:
+            return 0
+        delta = end_value - start_value
+        size = int(math.ceil(Fraction(delta, step_value)))
+        return max(size, 0)
+    start_value = float(start)
+    end_value = float(end)
+    step_value = float(step)
+    delta = (end_value - start_value) / step_value
     size = int(math.ceil(delta))
     return max(size, 0)
 
@@ -6250,12 +6287,15 @@ def _handle_arange_node(
     start = _resolve_scalar_arg(op_spec.name, start_arg, scalar_values)
     end = _resolve_scalar_arg(op_spec.name, end_arg, scalar_values)
     step = _resolve_scalar_arg(op_spec.name, step_arg, scalar_values)
+    for name, value in (("start", start), ("end", end), ("step", step)):
+        if not isinstance(value, numbers.Real):
+            raise RefBackendError(
+                f"codegen {op_spec.name} expects {name} to be an int or float"
+            )
     dtype_spec = _parse_arange_dtype(
-        op_spec.name, node.kwargs.get("dtype"), dtype_info
+        op_spec.name, node.kwargs.get("dtype"), dtype_info, start, end, step
     )
-    output_size = _compute_arange_size(
-        float(start), float(end), float(step)
-    )
+    output_size = _compute_arange_size(start, end, step)
     output_shape = (output_size,)
     shapes[node] = output_shape
     dtypes[node] = dtype_spec.torch_dtype

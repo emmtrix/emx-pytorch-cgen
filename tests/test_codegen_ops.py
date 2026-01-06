@@ -80,13 +80,6 @@ def _full_like_sample_filter(sample):
     return True
 
 
-def _arange_sample_filter(sample):
-    dtype = sample.kwargs.get("dtype")
-    if dtype is None:
-        return False
-    return dtype in (torch.float32, torch.int8, torch.int32)
-
-
 def _as_strided_sample_filter(sample):
     if not isinstance(sample.input, torch.Tensor):
         return False
@@ -985,7 +978,6 @@ CODEGEN_OP_TEST_CONFIG = {
     torch.ops.aten.arange.start_step: {
         "allowed_dtypes": (torch.float32, torch.int8, torch.int32),
         "allow_no_tensor_inputs": True,
-        "sample_filter": _arange_sample_filter,
     },
     torch.ops.aten.as_strided.default: {
         "sample_filter": _as_strided_sample_filter,
