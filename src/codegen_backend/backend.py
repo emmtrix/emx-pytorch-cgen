@@ -5226,12 +5226,24 @@ def _handle_pool1d_node(
         raise RefBackendError(
             f"codegen {op_spec.name} does not support ceil_mode"
         )
-    if not isinstance(count_include_pad, bool):
+    if isinstance(count_include_pad, bool):
+        count_include_pad_value = count_include_pad
+    elif isinstance(count_include_pad, numbers.Integral):
+        count_include_pad_value = bool(count_include_pad)
+    else:
         raise RefBackendError(
             f"codegen {op_spec.name} expects count_include_pad to be a bool"
         )
+    divisor_override_value = divisor_override
     if divisor_override is not None:
-        if not isinstance(divisor_override, int) or divisor_override <= 0:
+        if isinstance(divisor_override, bool) or not isinstance(
+            divisor_override, numbers.Integral
+        ):
+            raise RefBackendError(
+                f"codegen {op_spec.name} expects divisor_override to be a positive int"
+            )
+        divisor_override_value = int(divisor_override)
+        if divisor_override_value <= 0:
             raise RefBackendError(
                 f"codegen {op_spec.name} expects divisor_override to be a positive int"
             )
@@ -5257,8 +5269,8 @@ def _handle_pool1d_node(
             "padding": padding_value,
             "dilation": dilation_value,
             "ceil_mode": bool(ceil_mode),
-            "count_include_pad": count_include_pad,
-            "divisor_override": divisor_override,
+            "count_include_pad": count_include_pad_value,
+            "divisor_override": divisor_override_value,
         },
     )
 
