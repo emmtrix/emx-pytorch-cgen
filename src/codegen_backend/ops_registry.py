@@ -1041,6 +1041,11 @@ _REGISTRY.register_unary("conj_physical").targets(
     torch.ops.aten.conj_physical_.default,
     torch.ops.aten.conj_physical_,
 ).build()
+_REGISTRY.register_unary("clone").targets(
+    torch.clone,
+    torch.ops.aten.clone.default,
+    torch.ops.aten.clone,
+).build()
 _REGISTRY.register_unary("deg2rad").targets(
     torch.deg2rad,
     torch.ops.aten.deg2rad.default,
