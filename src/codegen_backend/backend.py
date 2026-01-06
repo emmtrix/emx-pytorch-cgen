@@ -854,6 +854,8 @@ def emit_body(
         broadcast_contiguous=False,
         c_type=_input_c_type(input_dtypes[0], dtype),
     )
+    if op_spec.name == "clone":
+        return [f"{indent}{output_access} = {input_access};"]
     if op_spec.name in _PARAMETRIC_UNARY_OPS:
         return _emit_parametric_unary(
             op_spec.name,

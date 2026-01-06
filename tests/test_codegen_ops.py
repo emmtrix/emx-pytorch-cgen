@@ -516,6 +516,7 @@ CODEGEN_ATEN_OPS = [
     torch.ops.aten.ceil.default,
     torch.ops.aten.clamp_max.Tensor,
     torch.ops.aten.clamp_min.Tensor,
+    torch.ops.aten.clone.default,
     torch.ops.aten.conj.default,
     torch.ops.aten.conj_physical.default,
     torch.ops.aten.copysign.Tensor,
