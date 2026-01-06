@@ -2,11 +2,12 @@ import hashlib
 import math
 import numbers
 import operator
-import subprocess
 import tempfile
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
+from distutils import ccompiler
+from distutils import sysconfig as distutils_sysconfig
 import torch
 import torch.nn.functional as F
 from importlib import resources
@@ -7181,21 +7182,24 @@ def _compile_generic_library(graph: _GenericGraph) -> _GenericLibrary:
 
     build_dir = Path(tempfile.mkdtemp(prefix="codegen_generic_"))
     c_path = build_dir / "ref_codegen_generic.c"
-    so_path = build_dir / "ref_codegen_generic.so"
     c_path.write_text(source, encoding="utf-8")
 
-    cmd = [
-        "cc",
-        "-shared",
-        "-O3",
-        "-fPIC",
-        "-I",
-        str(_C_SRC_DIR),
-        str(c_path),
-        "-o",
-        str(so_path),
-    ]
-    subprocess.check_call(cmd)
+    compiler = ccompiler.new_compiler()
+    distutils_sysconfig.customize_compiler(compiler)
+    compile_args: List[str]
+    if compiler.compiler_type == "msvc":
+        compile_args = ["/O2"]
+    else:
+        compile_args = ["-O3", "-fPIC"]
+    objects = compiler.compile(
+        [str(c_path)],
+        output_dir=str(build_dir),
+        include_dirs=[str(_C_SRC_DIR)],
+        extra_postargs=compile_args,
+    )
+    lib_name = "ref_codegen_generic"
+    compiler.link_shared_lib(objects, lib_name, output_dir=str(build_dir))
+    so_path = build_dir / compiler.library_filename(lib_name, lib_type="shared")
 
     import ctypes
 
