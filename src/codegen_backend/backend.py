@@ -3831,17 +3831,17 @@ def _parse_argminmax_args(
         reduction_dims = tuple(range(len(input_shape)))
         reduce_all = True
         return reduction_dims, keepdim, reduce_all
-    if isinstance(dim, torch.fx.Node):
-        raise RefBackendError(f"codegen {op_name} expects dim to be an int")
     if isinstance(dim, (tuple, list)):
         raise RefBackendError(f"codegen {op_name} expects dim to be an int")
-    try:
-        dim_value = operator.index(dim)
-    except TypeError as exc:
-        raise RefBackendError(f"codegen {op_name} expects dim to be an int") from exc
+    dim_value = _parse_constant_int(op_name, "dim", dim)
+    rank = len(input_shape)
+    if rank == 0:
+        if dim_value not in (-1, 0):
+            raise RefBackendError(f"codegen {op_name} dim is out of range")
+        return (), keepdim, True
     if dim_value < 0:
-        dim_value += len(input_shape)
-    if dim_value < 0 or dim_value >= len(input_shape):
+        dim_value += rank
+    if dim_value < 0 or dim_value >= rank:
         raise RefBackendError(f"codegen {op_name} dim is out of range")
     return (dim_value,), keepdim, False
 
