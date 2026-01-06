@@ -14,10 +14,7 @@ from jinja2 import Environment, FileSystemLoader
 import torch.fx
 from torch.fx.immutable_collections import immutable_list
 
-from c_ref_backend.cffi_bindings import (
-    RefBackendError,
-    _normalize_conv2d_param as _normalize_conv2d_pair,
-)
+from c_ref_backend.cffi_bindings import RefBackendError
 from codegen_backend.dtypes import (
     _C_TYPE_BY_DTYPE,
     _CODEGEN_DTYPES,
@@ -28,6 +25,11 @@ from codegen_backend.dtypes import (
 from codegen_backend.graph import _GenericGraph, _GenericLibrary, _OpNode
 from codegen_backend.kinds import build_kind_handlers
 from codegen_backend.ops_registry import SUPPORTED_OPS
+from codegen_backend.param_normalize import (
+    normalize_int_or_pair,
+    normalize_int_or_tuple,
+    normalize_padding,
+)
 from codegen_backend.registry import TARGET_REGISTRY
 from codegen_backend.specs import _OpSpec
 _BITWISE_OPS = {
@@ -240,24 +242,6 @@ def _conv2d_validate_channels(
     return has_batch, out_channels
 
 
-def _normalize_pool2d_param(name: str, value: object) -> Tuple[int, int]:
-    if isinstance(value, int):
-        return (value, value)
-    if (
-        isinstance(value, tuple)
-        and len(value) == 2
-        and all(isinstance(item, int) for item in value)
-    ):
-        return value
-    if (
-        isinstance(value, list)
-        and len(value) == 2
-        and all(isinstance(item, int) for item in value)
-    ):
-        return (value[0], value[1])
-    raise RefBackendError(f"pool2d expects {name} to be an int or a pair of ints")
-
-
 def _normalize_col2im_output_size(
     op_name: str, value: object
 ) -> Tuple[int, int]:
@@ -268,54 +252,11 @@ def _normalize_col2im_output_size(
             f"codegen {op_name} expects output_size to be a tuple of two ints"
         )
     try:
-        return tuple(int(operator.index(item)) for item in value)
-    except TypeError as exc:
+        return normalize_int_or_tuple("output_size", value, 2)
+    except ValueError as exc:
         raise RefBackendError(
             f"codegen {op_name} expects output_size to be a tuple of ints"
         ) from exc
-
-
-def _normalize_col2im_pair(
-    op_name: str, name: str, value: object
-) -> Tuple[int, int]:
-    if isinstance(value, torch.Size):
-        value = tuple(value)
-    if isinstance(value, (list, tuple)):
-        if len(value) != 2:
-            raise RefBackendError(
-                f"codegen {op_name} expects {name} to be an int or a pair of ints"
-            )
-        try:
-            return tuple(int(operator.index(item)) for item in value)
-        except TypeError as exc:
-            raise RefBackendError(
-                f"codegen {op_name} expects {name} to be an int or a pair of ints"
-            ) from exc
-    try:
-        scalar = int(operator.index(value))
-    except TypeError as exc:
-        raise RefBackendError(
-            f"codegen {op_name} expects {name} to be an int or a pair of ints"
-        ) from exc
-    return (scalar, scalar)
-
-
-def _normalize_pool1d_param(name: str, value: object) -> int:
-    if isinstance(value, int):
-        return value
-    if (
-        isinstance(value, tuple)
-        and len(value) == 1
-        and all(isinstance(item, int) for item in value)
-    ):
-        return value[0]
-    if (
-        isinstance(value, list)
-        and len(value) == 1
-        and all(isinstance(item, int) for item in value)
-    ):
-        return value[0]
-    raise RefBackendError(f"pool1d expects {name} to be an int or a 1-item tuple")
 
 
 def _pool1d_output_shape_from_shapes(
@@ -3057,16 +2998,11 @@ def _error_kwarg_specified_once(op_name: str, kwarg: str) -> RefBackendError:
     return RefBackendError(f"codegen {op_name} expects {kwarg} to be specified once")
 
 
-def _normalize_conv1d_param(name: str, value: object) -> int:
-    if isinstance(value, int):
-        return value
-    if (
-        isinstance(value, (tuple, list))
-        and len(value) == 1
-        and all(isinstance(item, int) for item in value)
-    ):
-        return value[0]
-    raise RefBackendError(f"codegen conv1d expects {name} to be an int or 1-item tuple")
+def _normalize_param(normalizer: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    try:
+        return normalizer(*args, **kwargs)
+    except ValueError as exc:
+        raise RefBackendError(str(exc)) from exc
 
 
 def _infer_reduction_output_shape(
@@ -4659,15 +4595,15 @@ def _handle_conv1d_node(
             )
     if len(input_shape) != 3 or len(weight_shape) != 3:
         raise RefBackendError("codegen conv1d requires 3D input and weight tensors")
-    stride_value = _normalize_conv1d_param("stride", stride)
-    dilation_value = _normalize_conv1d_param("dilation", dilation)
-    if isinstance(padding, str):
-        padding_mode = padding.lower()
-        if padding_mode not in ("same", "valid"):
-            raise RefBackendError(
-                "codegen conv1d expects padding to be an int, 1-item tuple, or 'same'/'valid'"
-            )
-        if padding_mode == "valid":
+    stride_value = _normalize_param(normalize_int_or_tuple, "stride", stride, 1)[0]
+    dilation_value = _normalize_param(
+        normalize_int_or_tuple, "dilation", dilation, 1
+    )[0]
+    padding_value = _normalize_param(
+        normalize_padding, "padding", padding, 1, allow_strings=("same", "valid")
+    )
+    if isinstance(padding_value, str):
+        if padding_value == "valid":
             padding_value = 0
             output_shape = _conv1d_output_shape_from_shapes(
                 input_shape,
@@ -4686,7 +4622,7 @@ def _handle_conv1d_node(
             )
             output_shape = (batch, out_channels, out_l)
     else:
-        padding_value = _normalize_conv1d_param("padding", padding)
+        padding_value = padding_value[0]
         output_shape = _conv1d_output_shape_from_shapes(
             input_shape,
             weight_shape,
@@ -4791,15 +4727,13 @@ def _handle_conv2d_node(
         raise RefBackendError("codegen conv2d requires 4D weight tensors")
     if len(input_shape) not in (3, 4):
         raise RefBackendError("codegen conv2d requires 3D or 4D input tensors")
-    stride_pair = _normalize_conv2d_pair("stride", stride)
-    dilation_pair = _normalize_conv2d_pair("dilation", dilation)
-    if isinstance(padding, str):
-        padding_mode = padding.lower()
-        if padding_mode not in ("same", "valid"):
-            raise RefBackendError(
-                "codegen conv2d expects padding to be an int, a pair of ints, or 'same'/'valid'"
-            )
-        if padding_mode == "valid":
+    stride_pair = _normalize_param(normalize_int_or_pair, "stride", stride)
+    dilation_pair = _normalize_param(normalize_int_or_pair, "dilation", dilation)
+    padding_value = _normalize_param(
+        normalize_padding, "padding", padding, 2, allow_strings=("same", "valid")
+    )
+    if isinstance(padding_value, str):
+        if padding_value == "valid":
             padding_pair = (0, 0)
             output_shape = _conv2d_output_shape_from_shapes(
                 input_shape,
@@ -4821,7 +4755,7 @@ def _handle_conv2d_node(
             else:
                 output_shape = (out_channels, out_h, out_w)
     else:
-        padding_pair = _normalize_conv2d_pair("padding", padding)
+        padding_pair = padding_value
         output_shape = _conv2d_output_shape_from_shapes(
             input_shape,
             weight_shape,
@@ -4974,13 +4908,21 @@ def _handle_pool1d_node(
         padding_value = 0
         dilation_value = 1
     else:
-        kernel_value = _normalize_pool1d_param("kernel_size", kernel_size)
+        kernel_value = _normalize_param(
+            normalize_int_or_tuple, "kernel_size", kernel_size, 1
+        )[0]
         if stride is None:
             stride_value = kernel_value
         else:
-            stride_value = _normalize_pool1d_param("stride", stride)
-        padding_value = _normalize_pool1d_param("padding", padding)
-        dilation_value = _normalize_pool1d_param("dilation", dilation)
+            stride_value = _normalize_param(
+                normalize_int_or_tuple, "stride", stride, 1
+            )[0]
+        padding_value = _normalize_param(
+            normalize_int_or_tuple, "padding", padding, 1
+        )[0]
+        dilation_value = _normalize_param(
+            normalize_int_or_tuple, "dilation", dilation, 1
+        )[0]
     if (
         kernel_value <= 0
         or stride_value <= 0
@@ -5148,13 +5090,15 @@ def _handle_pool2d_node(
         padding_pair = (0, 0)
         dilation_pair = (1, 1)
     else:
-        kernel_pair = _normalize_pool2d_param("kernel_size", kernel_size)
+        kernel_pair = _normalize_param(
+            normalize_int_or_pair, "kernel_size", kernel_size
+        )
         if stride is None:
             stride_pair = kernel_pair
         else:
-            stride_pair = _normalize_pool2d_param("stride", stride)
-        padding_pair = _normalize_pool2d_param("padding", padding)
-        dilation_pair = _normalize_pool2d_param("dilation", dilation)
+            stride_pair = _normalize_param(normalize_int_or_pair, "stride", stride)
+        padding_pair = _normalize_param(normalize_int_or_pair, "padding", padding)
+        dilation_pair = _normalize_param(normalize_int_or_pair, "dilation", dilation)
     if (
         kernel_pair[0] <= 0
         or kernel_pair[1] <= 0
@@ -5246,10 +5190,14 @@ def _handle_col2im_node(
             "codegen col2im expects constant output_size, kernel_size, dilation, padding, and stride"
         )
     output_pair = _normalize_col2im_output_size(op_spec.name, output_size)
-    kernel_pair = _normalize_col2im_pair(op_spec.name, "kernel_size", kernel_size)
-    dilation_pair = _normalize_col2im_pair(op_spec.name, "dilation", dilation)
-    padding_pair = _normalize_col2im_pair(op_spec.name, "padding", padding)
-    stride_pair = _normalize_col2im_pair(op_spec.name, "stride", stride)
+    kernel_pair = _normalize_param(
+        normalize_int_or_pair, "kernel_size", kernel_size
+    )
+    dilation_pair = _normalize_param(
+        normalize_int_or_pair, "dilation", dilation
+    )
+    padding_pair = _normalize_param(normalize_int_or_pair, "padding", padding)
+    stride_pair = _normalize_param(normalize_int_or_pair, "stride", stride)
     if (
         output_pair[0] <= 0
         or output_pair[1] <= 0

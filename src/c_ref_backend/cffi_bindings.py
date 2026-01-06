@@ -5,6 +5,7 @@ from typing import Optional, Tuple
 
 import torch
 
+from codegen_backend.param_normalize import normalize_int_or_pair
 
 class RefBackendError(RuntimeError):
     pass
@@ -249,21 +250,10 @@ def _validate_scalar_output(op_name: str, out: torch.Tensor) -> None:
 
 
 def _normalize_conv2d_param(name: str, value: object) -> Tuple[int, int]:
-    if isinstance(value, int):
-        return (value, value)
-    if (
-        isinstance(value, tuple)
-        and len(value) == 2
-        and all(isinstance(item, int) for item in value)
-    ):
-        return value
-    if (
-        isinstance(value, list)
-        and len(value) == 2
-        and all(isinstance(item, int) for item in value)
-    ):
-        return (value[0], value[1])
-    raise RefBackendError(f"conv2d expects {name} to be an int or a pair of ints")
+    try:
+        return normalize_int_or_pair(name, value)
+    except ValueError as exc:
+        raise RefBackendError(str(exc)) from exc
 
 
 def _conv2d_output_shape(
