@@ -4,6 +4,7 @@ import numbers
 import operator
 import tempfile
 from collections.abc import Sequence as ABCSequence
+from fractions import Fraction
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -143,6 +144,44 @@ def _contiguous_strides(shape: Sequence[int]) -> Tuple[int, ...]:
         strides[dim] = stride
         stride *= max(shape[dim], 1)
     return tuple(strides)
+
+
+def _channels_last_strides(shape: Sequence[int]) -> Tuple[int, ...]:
+    if len(shape) != 4:
+        raise RefBackendError("required rank 4 tensor to use channels_last format")
+    batch, channels, height, width = (
+        max(shape[0], 1),
+        max(shape[1], 1),
+        max(shape[2], 1),
+        max(shape[3], 1),
+    )
+    return (
+        height * width * channels,
+        1,
+        width * channels,
+        channels,
+    )
+
+
+def _channels_last_3d_strides(shape: Sequence[int]) -> Tuple[int, ...]:
+    if len(shape) != 5:
+        raise RefBackendError(
+            "required rank 5 tensor to use channels_last_3d format"
+        )
+    batch, channels, depth, height, width = (
+        max(shape[0], 1),
+        max(shape[1], 1),
+        max(shape[2], 1),
+        max(shape[3], 1),
+        max(shape[4], 1),
+    )
+    return (
+        depth * height * width * channels,
+        1,
+        height * width * channels,
+        width * channels,
+        channels,
+    )
 
 
 def _is_contiguous(shape: Sequence[int], strides: Sequence[int]) -> bool:
@@ -1056,6 +1095,67 @@ def _write_view_kernel(
         offset_expr = "0"
     if storage_offset:
         offset_expr = f"{storage_offset} + {offset_expr}"
+    lines.append(f"{indent}int64_t offset = {offset_expr};")
+    output_access = emit_output_access(
+        output_shape, output_strides, c_type=dtype.c_type
+    )
+    lines.append(f"{indent}{output_access} = a_ptr[offset];")
+    lines.extend(emit_footer(output_shape, indent))
+    return lines
+
+
+def _write_resize_kernel(
+    node_index: int,
+    op_node: _OpNode,
+    input_shape: Sequence[int],
+    input_strides: Sequence[int],
+    input_dtype: torch.dtype,
+    output_shape: Sequence[int],
+    output_strides: Sequence[int],
+    dtype: _CodegenDType,
+) -> List[str]:
+    input_suffix = _format_array_suffix(input_shape)
+    output_suffix = _format_array_suffix(output_shape)
+    input_c_type = _input_c_type(input_dtype, dtype)
+    signature = (
+        f"void node{node_index}_{op_node.spec.name}_{dtype.suffix}("
+        f"const {input_c_type} a{input_suffix}, "
+        f"{dtype.c_type} out{output_suffix}) {{"
+    )
+    lines = [signature]
+    lines.append(f"    const {input_c_type}* a_ptr = (const {input_c_type}*)a;")
+    loop_lines, indent = emit_loops(output_shape)
+    lines.extend(loop_lines)
+    output_contig_strides = _contiguous_strides(output_shape)
+    if output_contig_strides:
+        linear_terms = [
+            f"i{dim} * {stride}"
+            for dim, stride in enumerate(output_contig_strides)
+        ]
+        linear_expr = " + ".join(linear_terms)
+    else:
+        linear_expr = "0"
+    lines.append(f"{indent}int64_t linear = {linear_expr};")
+    if input_shape:
+        lines.append(f"{indent}int64_t remaining = linear;")
+        index_vars = []
+        for dim in range(len(input_shape) - 1, -1, -1):
+            size = input_shape[dim]
+            index_name = f"idx{dim}"
+            lines.append(
+                f"{indent}int64_t {index_name} = remaining % {size};"
+            )
+            if dim != 0:
+                lines.append(f"{indent}remaining /= {size};")
+            index_vars.append(index_name)
+        index_vars.reverse()
+        offset_terms = [
+            f"{index_vars[dim]} * {stride}"
+            for dim, stride in enumerate(input_strides)
+        ]
+        offset_expr = " + ".join(offset_terms) if offset_terms else "0"
+    else:
+        offset_expr = "0"
     lines.append(f"{indent}int64_t offset = {offset_expr};")
     output_access = emit_output_access(
         output_shape, output_strides, c_type=dtype.c_type
@@ -2424,6 +2524,49 @@ def _write_pool2d_kernel(
     return rendered.strip().splitlines()
 
 
+def _write_adaptive_avg_pool2d_backward_kernel(
+    node_index: int,
+    op_spec: _OpSpec,
+    grad_output_shape: Sequence[int],
+    input_shape: Sequence[int],
+    output_shape: Sequence[int],
+    kernel_size: Tuple[int, int],
+    stride: Tuple[int, int],
+    dtype: _CodegenDType,
+) -> List[str]:
+    pool2d_template = _get_template_env().get_template(
+        "adaptive_avg_pool2d_backward_kernel.c.j2"
+    )
+    batch, channels, in_h, in_w = input_shape
+    out_h, out_w = grad_output_shape[2], grad_output_shape[3]
+    k_h, k_w = kernel_size
+    stride_h, stride_w = stride
+    grad_output_suffix = _format_array_suffix(grad_output_shape)
+    input_suffix = _format_array_suffix(input_shape)
+    output_suffix = _format_array_suffix(output_shape)
+    signature = (
+        f"void node{node_index}_{op_spec.name}_{dtype.suffix}("
+        f"const {dtype.c_type} grad_output{grad_output_suffix}, "
+        f"const {dtype.c_type} input{input_suffix}, "
+        f"{dtype.c_type} out{output_suffix}) {{"
+    )
+    rendered = pool2d_template.render(
+        signature=signature,
+        batch=batch,
+        channels=channels,
+        in_h=in_h,
+        in_w=in_w,
+        out_h=out_h,
+        out_w=out_w,
+        k_h=k_h,
+        k_w=k_w,
+        stride_h=stride_h,
+        stride_w=stride_w,
+        c_type=dtype.c_type,
+    )
+    return rendered.strip().splitlines()
+
+
 def _write_pool1d_kernel(
     node_index: int,
     op_spec: _OpSpec,
@@ -3732,17 +3875,23 @@ def _write_cumsum_kernel(
     input_strides: Sequence[int],
     output_strides: Sequence[int],
     cumsum_dim: int,
-    dtype: _CodegenDType,
+    graph_dtype: _CodegenDType,
+    output_dtype: torch.dtype,
 ) -> List[str]:
-    input_c_type = _input_c_type(dtype.torch_dtype, dtype)
+    output_dtype_info = _CODEGEN_DTYPES.get(output_dtype)
+    if output_dtype_info is None:
+        raise RefBackendError(
+            "codegen cumsum supports only torch.float32, torch.int8, or torch.int32"
+        )
+    input_c_type = _input_c_type(graph_dtype.torch_dtype, graph_dtype)
     signature = (
-        f"void node{node_index}_{op_spec.name}_{dtype.suffix}("
+        f"void node{node_index}_{op_spec.name}_{graph_dtype.suffix}("
         f"const {input_c_type} input{_format_array_suffix(input_shape)}, "
-        f"{dtype.c_type} out{_format_array_suffix(input_shape)}) {{"
+        f"{output_dtype_info.c_type} out{_format_array_suffix(input_shape)}) {{"
     )
     lines = [signature]
     if not input_shape:
-        lines.append("    out[0] = input[0];")
+        lines.append(f"    out[0] = ({output_c_type})input[0];")
         lines.append("}")
         return lines
     loop_lines, indent = emit_loops(input_shape)
@@ -3753,10 +3902,12 @@ def _write_cumsum_kernel(
         output_strides,
         _is_contiguous(input_shape, output_strides),
         sizes=input_shape,
-        c_type=dtype.c_type,
+        c_type=output_dtype_info.c_type,
     )
-    acc_init = "0" if dtype.torch_dtype in _INTEGER_CODEGEN_DTYPES else "0.0f"
-    lines.append(f"{indent}{dtype.c_type} acc = {acc_init};")
+    acc_init = (
+        "0" if output_dtype in _INTEGER_CODEGEN_DTYPES else "0.0f"
+    )
+    lines.append(f"{indent}{output_dtype_info.c_type} acc = {acc_init};")
     lines.append(
         f"{indent}for (int64_t r{cumsum_dim} = 0; r{cumsum_dim} <= i{cumsum_dim}; ++r{cumsum_dim}) {{"
     )
@@ -3773,7 +3924,7 @@ def _write_cumsum_kernel(
         sizes=input_shape,
         c_type=input_c_type,
     )
-    lines.append(f"{inner_indent}acc += {input_access};")
+    lines.append(f"{inner_indent}acc += ({output_c_type}){input_access};")
     lines.append(f"{indent}}}")
     lines.append(f"{indent}{output_access} = acc;")
     lines.extend(emit_footer(input_shape, indent))
@@ -3822,9 +3973,12 @@ def _parse_cumsum_args(
             raise RefBackendError(f"codegen {op_name} dim is out of range")
     if dtype is not None:
         if isinstance(dtype, torch.fx.Node):
-            raise RefBackendError(
-                f"codegen {op_name} expects dtype to be torch.float32, torch.int8, or torch.int32"
-            )
+            meta_value = dtype.meta.get("val") or dtype.meta.get("example_value")
+            if meta_value is None:
+                raise RefBackendError(
+                    f"codegen {op_name} expects dtype to be torch.float32, torch.int8, or torch.int32"
+                )
+            dtype = meta_value
         if dtype not in (torch.float32, torch.int8, torch.int32):
             raise RefBackendError(
                 f"codegen {op_name} expects dtype to be torch.float32, torch.int8, or torch.int32"
@@ -4333,6 +4487,24 @@ def _parse_adaptive_avg_pool2d_args(
                 f"{sorted(extra)}"
             )
     return input_arg, output_size
+
+
+def _parse_adaptive_avg_pool2d_backward_args(
+    node: torch.fx.Node,
+) -> Tuple[torch.fx.Node, torch.fx.Node]:
+    args = list(node.args)
+    kwargs = dict(node.kwargs)
+    if len(args) != 2:
+        raise RefBackendError(
+            "codegen adaptive_avg_pool2d_backward expects grad_output and input"
+        )
+    if kwargs:
+        raise RefBackendError(
+            "codegen adaptive_avg_pool2d_backward expects no keyword arguments"
+        )
+    grad_output = args[0]
+    input_arg = args[1]
+    return grad_output, input_arg
 
 
 def _parse_max_pool2d_args(
@@ -5159,6 +5331,76 @@ def _handle_pool2d_node(
     )
 
 
+def _handle_adaptive_avg_pool2d_backward_node(
+    node: torch.fx.Node,
+    op_spec: _OpSpec,
+    dtype_info: _CodegenDType,
+    shapes: Dict[torch.fx.Node, Tuple[int, ...]],
+    strides: Dict[torch.fx.Node, Tuple[int, ...]],
+    dtypes: Dict[torch.fx.Node, torch.dtype],
+) -> _OpNode:
+    grad_output, input_arg = _parse_adaptive_avg_pool2d_backward_args(node)
+    if not isinstance(grad_output, torch.fx.Node) or not isinstance(
+        input_arg, torch.fx.Node
+    ):
+        raise _error_expected_tensor(op_spec.name)
+    if grad_output not in shapes or input_arg not in shapes:
+        raise _error_expected_tensor(op_spec.name)
+    if dtype_info.torch_dtype is not torch.float32:
+        raise RefBackendError(
+            "codegen adaptive_avg_pool2d_backward supports only torch.float32 tensors"
+        )
+    if dtypes[grad_output] is not torch.float32 or dtypes[input_arg] is not torch.float32:
+        raise RefBackendError(
+            "codegen adaptive_avg_pool2d_backward supports only torch.float32 tensors"
+        )
+    grad_output_shape = shapes[grad_output]
+    input_shape = shapes[input_arg]
+    if len(grad_output_shape) != 4 or len(input_shape) != 4:
+        raise RefBackendError(
+            "codegen adaptive_avg_pool2d_backward requires 4D input tensors"
+        )
+    if not _is_contiguous(grad_output_shape, strides[grad_output]):
+        raise RefBackendError(
+            "codegen adaptive_avg_pool2d_backward requires contiguous grad_output tensors"
+        )
+    if not _is_contiguous(input_shape, strides[input_arg]):
+        raise RefBackendError(
+            "codegen adaptive_avg_pool2d_backward requires contiguous input tensors"
+        )
+    if grad_output_shape[0] != input_shape[0] or grad_output_shape[1] != input_shape[1]:
+        raise RefBackendError(
+            "codegen adaptive_avg_pool2d_backward requires matching batch and channel sizes"
+        )
+    out_h, out_w = grad_output_shape[2], grad_output_shape[3]
+    in_h, in_w = input_shape[2], input_shape[3]
+    if out_h <= 0 or out_w <= 0:
+        raise RefBackendError(
+            "codegen adaptive_avg_pool2d_backward expects positive output size"
+        )
+    if in_h % out_h != 0 or in_w % out_w != 0:
+        raise RefBackendError(
+            "codegen adaptive_avg_pool2d_backward requires input sizes divisible by output size"
+        )
+    kernel_pair = (in_h // out_h, in_w // out_w)
+    stride_pair = kernel_pair
+    output_shape = input_shape
+    shapes[node] = output_shape
+    dtypes[node] = dtype_info.torch_dtype
+    strides[node] = _contiguous_strides(output_shape)
+    return _OpNode(
+        node=node,
+        spec=op_spec,
+        inputs=[grad_output, input_arg],
+        output_shape=output_shape,
+        inplace_input=None,
+        params={
+            "kernel_size": kernel_pair,
+            "stride": stride_pair,
+        },
+    )
+
+
 def _handle_col2im_node(
     node: torch.fx.Node,
     op_spec: _OpSpec,
@@ -5354,23 +5596,45 @@ def _handle_batch_norm_node(
     strides: Dict[torch.fx.Node, Tuple[int, ...]],
     dtypes: Dict[torch.fx.Node, torch.dtype],
 ) -> _OpNode:
-    if len(node.args) < 7:
+    has_training_flag = op_spec.name == "_native_batch_norm_legit"
+    expected_inputs = 8 if has_training_flag else 7
+    if len(node.args) < expected_inputs:
         raise RefBackendError(
-            "codegen _native_batch_norm_legit_no_training expects 7 inputs"
+            f"codegen {op_spec.name} expects {expected_inputs} inputs"
         )
     if node.kwargs:
         raise RefBackendError(
-            "codegen _native_batch_norm_legit_no_training expects positional args only"
+            f"codegen {op_spec.name} expects positional args only"
         )
-    (
-        input_arg,
-        weight,
-        bias,
-        running_mean,
-        running_var,
-        momentum,
-        eps,
-    ) = node.args[:7]
+    if has_training_flag:
+        (
+            input_arg,
+            weight,
+            bias,
+            running_mean,
+            running_var,
+            training,
+            momentum,
+            eps,
+        ) = node.args[:8]
+        if isinstance(training, torch.fx.Node):
+            raise RefBackendError(
+                f"codegen {op_spec.name} expects constant training flag"
+            )
+        if training not in (False, 0):
+            raise RefBackendError(
+                f"codegen {op_spec.name} supports only training=False"
+            )
+    else:
+        (
+            input_arg,
+            weight,
+            bias,
+            running_mean,
+            running_var,
+            momentum,
+            eps,
+        ) = node.args[:7]
     if not isinstance(input_arg, torch.fx.Node) or input_arg not in shapes:
         raise _error_expected_tensor(op_spec.name)
     if not isinstance(running_mean, torch.fx.Node) or running_mean not in shapes:
@@ -5388,21 +5652,17 @@ def _handle_batch_norm_node(
             raise _error_expected_tensor(op_spec.name)
         bias_node = bias
     if dtype_info.torch_dtype is not torch.float32:
-        raise RefBackendError(
-            "codegen _native_batch_norm_legit_no_training supports only torch.float32"
-        )
+        raise RefBackendError(f"codegen {op_spec.name} supports only torch.float32")
     if dtypes[input_arg] is not torch.float32:
-        raise RefBackendError(
-            "codegen _native_batch_norm_legit_no_training supports only torch.float32"
-        )
+        raise RefBackendError(f"codegen {op_spec.name} supports only torch.float32")
     input_shape = shapes[input_arg]
     if len(input_shape) < 2:
         raise RefBackendError(
-            "codegen _native_batch_norm_legit_no_training expects at least 2D inputs"
+            f"codegen {op_spec.name} expects at least 2D inputs"
         )
     if not _is_contiguous(input_shape, strides[input_arg]):
         raise RefBackendError(
-            "codegen _native_batch_norm_legit_no_training requires contiguous input"
+            f"codegen {op_spec.name} requires contiguous input"
         )
     channels = input_shape[1]
     for stat_arg, name in (
@@ -5412,44 +5672,43 @@ def _handle_batch_norm_node(
         stat_shape = shapes[stat_arg]
         if stat_shape != (channels,):
             raise RefBackendError(
-                f"codegen _native_batch_norm_legit_no_training expects {name} shape "
-                "to match channels"
+                f"codegen {op_spec.name} expects {name} shape to match channels"
             )
         if not _is_contiguous(stat_shape, strides[stat_arg]):
             raise RefBackendError(
-                "codegen _native_batch_norm_legit_no_training requires contiguous stats"
+                f"codegen {op_spec.name} requires contiguous stats"
             )
         if dtypes[stat_arg] is not torch.float32:
             raise RefBackendError(
-                "codegen _native_batch_norm_legit_no_training supports only torch.float32"
+                f"codegen {op_spec.name} supports only torch.float32"
             )
     if weight_node is not None:
         if shapes[weight_node] != (channels,):
             raise RefBackendError(
-                "codegen _native_batch_norm_legit_no_training expects weight shape to match channels"
+                f"codegen {op_spec.name} expects weight shape to match channels"
             )
         if dtypes[weight_node] is not torch.float32:
             raise RefBackendError(
-                "codegen _native_batch_norm_legit_no_training supports only torch.float32"
+                f"codegen {op_spec.name} supports only torch.float32"
             )
     if bias_node is not None:
         if shapes[bias_node] != (channels,):
             raise RefBackendError(
-                "codegen _native_batch_norm_legit_no_training expects bias shape to match channels"
+                f"codegen {op_spec.name} expects bias shape to match channels"
             )
         if dtypes[bias_node] is not torch.float32:
             raise RefBackendError(
-                "codegen _native_batch_norm_legit_no_training supports only torch.float32"
+                f"codegen {op_spec.name} supports only torch.float32"
             )
     if isinstance(momentum, torch.fx.Node) or isinstance(eps, torch.fx.Node):
         raise RefBackendError(
-            "codegen _native_batch_norm_legit_no_training expects constant momentum and eps"
+            f"codegen {op_spec.name} expects constant momentum and eps"
         )
     try:
         eps_value = float(eps)
     except (TypeError, ValueError) as exc:
         raise RefBackendError(
-            "codegen _native_batch_norm_legit_no_training expects eps to be a float"
+            f"codegen {op_spec.name} expects eps to be a float"
         ) from exc
     shapes[node] = input_shape
     dtypes[node] = dtype_info.torch_dtype
@@ -5720,13 +5979,14 @@ def _handle_cumsum_node(
     dim, dtype_override = _parse_cumsum_args(
         op_spec.name, node, shapes[input_arg]
     )
-    if dtype_override is not None and dtype_override is not dtype_info.torch_dtype:
+    output_dtype = dtype_override or dtype_info.torch_dtype
+    if output_dtype not in _CODEGEN_DTYPES:
         raise RefBackendError(
-            f"codegen {op_spec.name} expects dtype to match the graph dtype"
+            f"codegen {op_spec.name} expects dtype to be torch.float32, torch.int8, or torch.int32"
         )
     output_shape = shapes[input_arg]
     shapes[node] = output_shape
-    dtypes[node] = dtype_info.torch_dtype
+    dtypes[node] = output_dtype
     strides[node] = _contiguous_strides(output_shape)
     return _OpNode(
         node=node,
@@ -5938,16 +6198,10 @@ def _handle_fill_node(
                 f"codegen {op_spec.name} expects a single scalar value"
             )
         value = node.kwargs["value"]
-    if op_spec.name == "full_like" and "fill_value" in node.kwargs:
-        if value is not None:
-            raise RefBackendError(
-                f"codegen {op_spec.name} expects a single scalar value"
-            )
-        value = node.kwargs["fill_value"]
     if op_spec.name == "full_like":
         allowed = {
-            "value",
             "fill_value",
+            "value",
             "dtype",
             "layout",
             "device",
@@ -5959,22 +6213,73 @@ def _handle_fill_node(
             raise RefBackendError(
                 f"codegen {op_spec.name} got unexpected kwargs: {sorted(extra)}"
             )
+        if "fill_value" in node.kwargs:
+            if value is not None:
+                raise RefBackendError(
+                    f"codegen {op_spec.name} expects a single scalar value"
+                )
+            value = node.kwargs["fill_value"]
+        if "value" in node.kwargs:
+            if value is not None:
+                raise RefBackendError(
+                    f"codegen {op_spec.name} expects a single scalar value"
+                )
+            value = node.kwargs["value"]
         dtype = node.kwargs.get("dtype")
+        if isinstance(dtype, torch.fx.Node):
+            raise RefBackendError(
+                f"codegen {op_spec.name} expects dtype to be a constant"
+            )
         if dtype is not None and dtype is not dtype_info.torch_dtype:
             raise RefBackendError(
                 f"codegen {op_spec.name} expects dtype to match the graph dtype"
             )
-        for name in ("layout", "device", "memory_format"):
-            value_kw = node.kwargs.get(name)
-            if value_kw is not None:
-                raise RefBackendError(
-                    f"codegen {op_spec.name} expects {name} to be None"
-                )
+        layout = node.kwargs.get("layout")
+        if isinstance(layout, torch.fx.Node):
+            raise RefBackendError(
+                f"codegen {op_spec.name} expects layout to be a constant"
+            )
+        if layout is not None and layout is not torch.strided:
+            raise RefBackendError(
+                f"codegen {op_spec.name} expects layout to be None or torch.strided"
+            )
+        device = node.kwargs.get("device")
+        if isinstance(device, torch.fx.Node):
+            raise RefBackendError(
+                f"codegen {op_spec.name} expects device to be a constant"
+            )
+        if device is not None and device != "cpu" and device != torch.device("cpu"):
+            raise RefBackendError(
+                f"codegen {op_spec.name} expects device to be None or cpu"
+            )
         pin_memory = node.kwargs.get("pin_memory")
+        if isinstance(pin_memory, torch.fx.Node):
+            raise RefBackendError(
+                f"codegen {op_spec.name} expects pin_memory to be a constant"
+            )
         if pin_memory not in (None, False):
             raise RefBackendError(
                 f"codegen {op_spec.name} expects pin_memory to be False"
             )
+        memory_format = node.kwargs.get("memory_format")
+        if isinstance(memory_format, torch.fx.Node):
+            raise RefBackendError(
+                f"codegen {op_spec.name} expects memory_format to be a constant"
+            )
+        if memory_format not in (
+            None,
+            torch.contiguous_format,
+            torch.preserve_format,
+        ):
+            raise RefBackendError(
+                f"codegen {op_spec.name} expects memory_format to be None, "
+                "torch.contiguous_format, or torch.preserve_format"
+            )
+        if memory_format in (None, torch.preserve_format):
+            if strides[input_arg] != _contiguous_strides(shapes[input_arg]):
+                raise RefBackendError(
+                    f"codegen {op_spec.name} expects contiguous input when memory_format preserves format"
+                )
     elif node.kwargs and set(node.kwargs) != {"value"}:
         raise RefBackendError(
             f"codegen {op_spec.name} expects only 'value' as a keyword argument"
@@ -6009,32 +6314,68 @@ def _parse_arange_dtype(
     op_name: str,
     dtype: torch.dtype | None,
     dtype_info: _CodegenDType | None,
+    start: float | int | bool,
+    end: float | int | bool,
+    step: float | int | bool,
 ) -> _CodegenDType:
     if dtype is None:
-        if dtype_info is not None:
-            dtype = dtype_info.torch_dtype
-        else:
+        if any(
+            not isinstance(value, numbers.Integral)
+            for value in (start, end, step)
+        ):
             dtype = torch.get_default_dtype()
+        else:
+            dtype = torch.int32
     if dtype is torch.bool:
         raise RefBackendError(
             f"codegen {op_name} supports only numeric dtypes"
         )
     dtype_spec = _CODEGEN_DTYPES.get(dtype)
     if dtype_spec is None:
-        raise RefBackendError(
-            f"codegen {op_name} supports only torch.float32, torch.int8, or torch.int32"
+        supported = ", ".join(
+            f"torch.{supported_dtype.name}"
+            for supported_dtype in _CODEGEN_DTYPES
+            if supported_dtype is not torch.bool
         )
-    if dtype_info is not None and dtype_spec.torch_dtype is not dtype_info.torch_dtype:
+        raise RefBackendError(
+            f"codegen {op_name} supports only {supported}"
+        )
+    if (
+        dtype_info is not None
+        and dtype_spec.torch_dtype is not dtype_info.torch_dtype
+    ):
         raise RefBackendError(
             f"codegen {op_name} expects dtype to match the graph dtype"
         )
     return dtype_spec
 
 
-def _compute_arange_size(start: float, end: float, step: float) -> int:
+def _compute_arange_size(
+    start: float | int | bool,
+    end: float | int | bool,
+    step: float | int | bool,
+) -> int:
     if step == 0:
         raise RefBackendError("codegen arange expects step to be non-zero")
-    delta = (end - start) / step
+    if all(
+        isinstance(value, numbers.Integral) for value in (start, end, step)
+    ):
+        start_value = int(start)
+        end_value = int(end)
+        step_value = int(step)
+        if step_value == 0:
+            raise RefBackendError("codegen arange expects step to be non-zero")
+        if step_value > 0 and end_value <= start_value:
+            return 0
+        if step_value < 0 and end_value >= start_value:
+            return 0
+        delta = end_value - start_value
+        size = int(math.ceil(Fraction(delta, step_value)))
+        return max(size, 0)
+    start_value = float(start)
+    end_value = float(end)
+    step_value = float(step)
+    delta = (end_value - start_value) / step_value
     size = int(math.ceil(delta))
     return max(size, 0)
 
@@ -6110,12 +6451,15 @@ def _handle_arange_node(
     start = _resolve_scalar_arg(op_spec.name, start_arg, scalar_values)
     end = _resolve_scalar_arg(op_spec.name, end_arg, scalar_values)
     step = _resolve_scalar_arg(op_spec.name, step_arg, scalar_values)
+    for name, value in (("start", start), ("end", end), ("step", step)):
+        if not isinstance(value, numbers.Real):
+            raise RefBackendError(
+                f"codegen {op_spec.name} expects {name} to be an int or float"
+            )
     dtype_spec = _parse_arange_dtype(
-        op_spec.name, node.kwargs.get("dtype"), dtype_info
+        op_spec.name, node.kwargs.get("dtype"), dtype_info, start, end, step
     )
-    output_size = _compute_arange_size(
-        float(start), float(end), float(step)
-    )
+    output_size = _compute_arange_size(start, end, step)
     output_shape = (output_size,)
     shapes[node] = output_shape
     dtypes[node] = dtype_spec.torch_dtype
@@ -6421,14 +6765,13 @@ def _handle_resize_node(
     dtypes: Dict[torch.fx.Node, torch.dtype],
     inplace_input: int | None,
 ) -> _OpNode:
+    memory_format = None
     if node.kwargs:
-        if (
-            set(node.kwargs) != {"memory_format"}
-            or node.kwargs["memory_format"] is not None
-        ):
+        if set(node.kwargs) != {"memory_format"}:
             raise RefBackendError(
-                "codegen resize_ supports only memory_format=None"
+                "codegen resize_ expects only memory_format as a keyword argument"
             )
+        memory_format = node.kwargs.get("memory_format")
     if len(node.args) != 2:
         raise RefBackendError("codegen resize_ expects input and size arguments")
     input_arg, size_arg = node.args
@@ -6441,23 +6784,32 @@ def _handle_resize_node(
             "codegen resize_ expects inputs to share the graph dtype"
         )
     size = _parse_resize_size(op_spec.name, size_arg)
-    input_shape = shapes[input_arg]
-    if size != input_shape:
+    if any(dim < 0 for dim in size):
         raise RefBackendError(
-            "codegen resize_ supports only size values that match the input shape"
+            "codegen resize_ expects size values to be non-negative"
         )
-    shapes[node] = input_shape
+    input_shape = shapes[input_arg]
+    if math.prod(size) != math.prod(input_shape):
+        raise RefBackendError(
+            "codegen resize_ expects size to match the input numel"
+        )
+    shapes[node] = size
     dtypes[node] = dtype_info.torch_dtype
-    if inplace_input is not None:
-        strides[node] = strides[input_arg]
+    if memory_format is None or memory_format is torch.contiguous_format:
+        output_strides = _contiguous_strides(size)
+    elif memory_format is torch.channels_last:
+        output_strides = _channels_last_strides(size)
+    elif memory_format is torch.channels_last_3d:
+        output_strides = _channels_last_3d_strides(size)
     else:
-        strides[node] = _contiguous_strides(input_shape)
+        raise RefBackendError("Unsupported memory formatPreserve")
+    strides[node] = output_strides
     return _OpNode(
         node=node,
         spec=op_spec,
         inputs=[input_arg],
-        output_shape=input_shape,
-        inplace_input=inplace_input,
+        output_shape=size,
+        inplace_input=None,
     )
 
 
@@ -6577,11 +6929,13 @@ def _analyze_generic_graph(
                         "codegen backend expects getitem source to be analyzed"
                     )
                 if source.target not in {
+                    torch.ops.aten._native_batch_norm_legit,
+                    torch.ops.aten._native_batch_norm_legit.default,
                     torch.ops.aten._native_batch_norm_legit_no_training,
                     torch.ops.aten._native_batch_norm_legit_no_training.default,
                 }:
                     raise RefBackendError(
-                        "codegen backend supports getitem only for _native_batch_norm_legit_no_training"
+                        "codegen backend supports getitem only for _native_batch_norm_legit* ops"
                     )
                 alias_map[node] = source
                 shapes[node] = shapes[source]
@@ -6647,6 +7001,13 @@ def _analyze_generic_graph(
             if op_spec.kind == "pool2d":
                 op_nodes.append(
                     _handle_pool2d_node(
+                        node, op_spec, dtype_info, shapes, strides, dtypes
+                    )
+                )
+                continue
+            if op_spec.kind == "pool2d_backward":
+                op_nodes.append(
+                    _handle_adaptive_avg_pool2d_backward_node(
                         node, op_spec, dtype_info, shapes, strides, dtypes
                     )
                 )
