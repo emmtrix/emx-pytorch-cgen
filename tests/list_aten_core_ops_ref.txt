@@ -68,7 +68,7 @@ div.Scalar_mode                          -     -
 div.Tensor                               -     -      
 div.Tensor_mode                          -     -      
 elu                                      -     yes    
-embedding                                -     -      
+embedding                                -     yes    
 embedding_dense_backward                 -     -      
 empty.memory_format                      -     -      
 empty_strided                            -     -      
@@ -196,8 +196,8 @@ where.self                               -     -
 Summary
 total aten ops: 192
 supported by cref only: 1
-supported by codegen only: 22
+supported by codegen only: 23
 supported by both: 39
-unsupported by either: 130
-supported by codegen: 61 / 192 (31.8 %)
+unsupported by either: 129
+supported by codegen: 62 / 192 (32.3 %)
 supported by c-ref: 40 / 192 (20.8 %)

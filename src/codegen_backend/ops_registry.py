@@ -24,6 +24,7 @@ _VALID_KINDS = {
     "conv2d",
     "pool1d",
     "pool2d",
+    "embedding",
 }
 
 
@@ -1264,6 +1265,11 @@ _REGISTRY.register_op("cat", kind="concat").targets(
     torch.cat,
     torch.ops.aten.cat.default,
     torch.ops.aten.cat,
+).build()
+_REGISTRY.register_op("embedding", kind="embedding").targets(
+    F.embedding,
+    torch.ops.aten.embedding.default,
+    torch.ops.aten.embedding,
 ).build()
 _REGISTRY.register_op("addmm", kind="addmm").targets(
     torch.addmm,
