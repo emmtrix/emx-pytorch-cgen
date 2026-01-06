@@ -33,6 +33,7 @@ _VALID_KINDS = {
     "gather",
     "batch_norm",
     "pdist",
+    "col2im",
 }
 
 
@@ -1466,6 +1467,10 @@ _REGISTRY.register_op("conv2d", kind="conv2d").targets(
 _REGISTRY.register_op("conv1d", kind="conv1d").targets(
     torch.ops.aten.conv1d.default,
     torch.ops.aten.conv1d,
+).build()
+_REGISTRY.register_op("col2im", kind="col2im").targets(
+    torch.ops.aten.col2im.default,
+    torch.ops.aten.col2im,
 ).build()
 _REGISTRY.register_op("avg_pool1d", kind="pool1d").targets(
     F.avg_pool1d,

@@ -54,7 +54,7 @@ ceil                                     yes   yes
 clamp                                    -     yes    
 clamp.Tensor                             -     -      
 clone                                    -     yes    
-col2im                                   -     -      
+col2im                                   -     yes    
 constant_pad_nd                          -     -      
 convolution                              yes   yes    
 convolution_backward                     -     -      
