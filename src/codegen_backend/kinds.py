@@ -163,6 +163,24 @@ class ViewHandler(KindHandler):
         )
 
 
+class ResizeHandler(KindHandler):
+    def emit_kernel(
+        self, node_index: int, op_node: _OpNode, graph: _GenericGraph
+    ) -> List[str]:
+        backend = _backend_module()
+        input_node = op_node.inputs[0]
+        return backend._write_resize_kernel(
+            node_index,
+            op_node,
+            graph.shapes[input_node],
+            graph.strides[input_node],
+            graph.dtypes[input_node],
+            op_node.output_shape,
+            graph.strides[op_node.node],
+            graph.dtype,
+        )
+
+
 class EmptyStridedHandler(KindHandler):
     def emit_kernel(
         self, node_index: int, op_node: _OpNode, graph: _GenericGraph
@@ -861,6 +879,7 @@ def build_kind_handlers() -> Dict[str, KindHandler]:
         "flip": FlipHandler(),
         "pad": PadHandler(),
         "view": ViewHandler(),
+        "resize": ResizeHandler(),
         "empty_strided": EmptyStridedHandler(),
         "diagonal": DiagonalHandler(),
         "reduction": ReductionHandler(),

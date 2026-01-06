@@ -97,29 +97,6 @@ def _as_strided_sample_filter(sample):
     return True
 
 
-def _resize_sample_filter(sample):
-    if not isinstance(sample.input, torch.Tensor):
-        return False
-    if sample.kwargs.get("memory_format") is not None:
-        return False
-    size_value = None
-    if sample.args:
-        size_value = sample.args[0]
-    else:
-        size_value = sample.kwargs.get("size")
-    if size_value is None:
-        return False
-    if isinstance(size_value, torch.Size):
-        size_value = tuple(size_value)
-    if not isinstance(size_value, (list, tuple)):
-        return False
-    try:
-        size_tuple = tuple(int(operator.index(item)) for item in size_value)
-    except TypeError:
-        return False
-    return size_tuple == tuple(sample.input.shape)
-
-
 def _normalize_conv2d_param(value):
     try:
         return normalize_int_or_pair("value", value)
@@ -1048,9 +1025,7 @@ CODEGEN_OP_TEST_CONFIG = {
     torch.ops.aten.conv1d.default: {
         "allowed_dtypes": (torch.float32,),
     },
-    torch.ops.aten.resize_.default: {
-        "sample_filter": _resize_sample_filter,
-    },
+    torch.ops.aten.resize_.default: {},
     torch.ops.aten.cumsum.default: {
         "allowed_dtypes": (torch.float32, torch.int8, torch.int32),
     },

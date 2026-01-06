@@ -37,6 +37,7 @@ _VALID_KINDS = {
     "pdist",
     "pad",
     "empty_strided",
+    "resize",
     "col2im",
 }
 
@@ -1123,9 +1124,7 @@ _REGISTRY.register_binary("copy").targets(
     torch.ops.aten.copy.default,
     torch.ops.aten.copy,
 ).build()
-_REGISTRY.register_unary("resize_").targets(
-    torch.ops.aten.resize_.default,
-).inplace(
+_REGISTRY.register_op("resize_", kind="resize").targets(
     torch.ops.aten.resize_.default,
 ).build()
 _REGISTRY.register_op("fill", "fill").targets(
