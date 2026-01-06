@@ -692,6 +692,7 @@ CODEGEN_EXTRA_ATEN_OPS = [
     torch.ops.aten._softmax.default,
     torch.ops.aten._to_copy.default,
     torch.ops.aten.adaptive_avg_pool1d.default,
+    torch.ops.aten._adaptive_avg_pool2d.default,
     torch.ops.aten._native_batch_norm_legit_no_training.default,
     torch.ops.aten._pdist_forward.default,
 ]
@@ -1448,6 +1449,14 @@ class TestCodegenAdditionalOps(TestCase):
         aten_overload = torch.ops.aten.adaptive_avg_pool1d.default
         compiled = _compile_codegen_op(aten_overload)
         inputs = (torch.rand(2, 3, 6, dtype=torch.float32), 3)
+        expected = aten_overload(*inputs)
+        result = compiled(*inputs)
+        torch.testing.assert_close(result, expected)
+
+    def test_codegen_adaptive_avg_pool2d_matches_eager(self):
+        aten_overload = torch.ops.aten._adaptive_avg_pool2d.default
+        compiled = _compile_codegen_op(aten_overload)
+        inputs = (torch.rand(2, 3, 6, 8, dtype=torch.float32), (3, 4))
         expected = aten_overload(*inputs)
         result = compiled(*inputs)
         torch.testing.assert_close(result, expected)
