@@ -1443,6 +1443,13 @@ _REGISTRY.register_op("adaptive_avg_pool1d", kind="pool1d").targets(
     torch.ops.aten.adaptive_avg_pool1d.default,
     torch.ops.aten.adaptive_avg_pool1d,
 ).build()
+_REGISTRY.register_op("adaptive_avg_pool2d", kind="pool2d").targets(
+    F.adaptive_avg_pool2d,
+    torch.ops.aten.adaptive_avg_pool2d.default,
+    torch.ops.aten.adaptive_avg_pool2d,
+    torch.ops.aten._adaptive_avg_pool2d.default,
+    torch.ops.aten._adaptive_avg_pool2d,
+).build()
 _REGISTRY.register_op("max_pool1d", kind="pool1d").targets(
     F.max_pool1d,
     torch.ops.aten.max_pool1d.default,

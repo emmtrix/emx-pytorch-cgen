@@ -4394,6 +4394,33 @@ def _parse_adaptive_avg_pool1d_args(
     return input_arg, output_size
 
 
+def _parse_adaptive_avg_pool2d_args(
+    node: torch.fx.Node,
+) -> Tuple[torch.fx.Node, object]:
+    args = list(node.args)
+    kwargs = dict(node.kwargs)
+    if len(args) < 2 or len(args) > 2:
+        raise RefBackendError(
+            "codegen adaptive_avg_pool2d expects input and output_size"
+        )
+    input_arg = args[0]
+    output_size = args[1]
+    if kwargs:
+        if "output_size" in kwargs:
+            if len(args) > 1:
+                raise _error_kwarg_specified_once(
+                    "adaptive_avg_pool2d", "output_size"
+                )
+            output_size = kwargs["output_size"]
+        extra = set(kwargs) - {"output_size"}
+        if extra:
+            raise RefBackendError(
+                "codegen adaptive_avg_pool2d got unexpected kwargs: "
+                f"{sorted(extra)}"
+            )
+    return input_arg, output_size
+
+
 def _parse_max_pool2d_args(
     node: torch.fx.Node,
 ) -> Tuple[torch.fx.Node, object, object, object, object, object]:
@@ -5040,7 +5067,16 @@ def _handle_pool2d_node(
     strides: Dict[torch.fx.Node, Tuple[int, ...]],
     dtypes: Dict[torch.fx.Node, torch.dtype],
 ) -> _OpNode:
-    if op_spec.name == "max_pool2d":
+    if op_spec.name == "adaptive_avg_pool2d":
+        input_arg, output_size = _parse_adaptive_avg_pool2d_args(node)
+        kernel_size = None
+        stride = None
+        padding = 0
+        dilation = 1
+        ceil_mode = False
+        count_include_pad = False
+        divisor_override = None
+    elif op_spec.name == "max_pool2d":
         (
             input_arg,
             kernel_size,
@@ -5103,13 +5139,50 @@ def _handle_pool2d_node(
         raise RefBackendError(
             f"codegen {op_spec.name} requires contiguous input tensors"
         )
-    kernel_pair = _normalize_pool2d_param("kernel_size", kernel_size)
-    if stride is None:
+    if op_spec.name == "adaptive_avg_pool2d":
+        if isinstance(output_size, torch.fx.Node):
+            raise RefBackendError(
+                "codegen adaptive_avg_pool2d expects output_size to be a tuple of ints"
+            )
+        if isinstance(output_size, torch.Size):
+            output_size = tuple(output_size)
+        if isinstance(output_size, int):
+            output_pair = (output_size, output_size)
+        elif isinstance(output_size, (tuple, list)):
+            if len(output_size) != 2:
+                raise RefBackendError(
+                    "codegen adaptive_avg_pool2d expects output_size to have two values"
+                )
+            output_pair = tuple(output_size)
+        else:
+            raise RefBackendError(
+                "codegen adaptive_avg_pool2d expects output_size to be a tuple of ints"
+            )
+        if not all(isinstance(item, int) for item in output_pair):
+            raise RefBackendError(
+                "codegen adaptive_avg_pool2d expects output_size to be a tuple of ints"
+            )
+        if output_pair[0] <= 0 or output_pair[1] <= 0:
+            raise RefBackendError(
+                "codegen adaptive_avg_pool2d expects output_size to be positive"
+            )
+        in_h, in_w = input_shape[2], input_shape[3]
+        if in_h % output_pair[0] != 0 or in_w % output_pair[1] != 0:
+            raise RefBackendError(
+                "codegen adaptive_avg_pool2d requires input sizes divisible by output_size"
+            )
+        kernel_pair = (in_h // output_pair[0], in_w // output_pair[1])
         stride_pair = kernel_pair
+        padding_pair = (0, 0)
+        dilation_pair = (1, 1)
     else:
-        stride_pair = _normalize_pool2d_param("stride", stride)
-    padding_pair = _normalize_pool2d_param("padding", padding)
-    dilation_pair = _normalize_pool2d_param("dilation", dilation)
+        kernel_pair = _normalize_pool2d_param("kernel_size", kernel_size)
+        if stride is None:
+            stride_pair = kernel_pair
+        else:
+            stride_pair = _normalize_pool2d_param("stride", stride)
+        padding_pair = _normalize_pool2d_param("padding", padding)
+        dilation_pair = _normalize_pool2d_param("dilation", dilation)
     if (
         kernel_pair[0] <= 0
         or kernel_pair[1] <= 0
