@@ -37,7 +37,7 @@ atan                                     yes   yes
 atan2                                    yes   yes    
 atan2.out                                -     -      
 atanh                                    yes   yes    
-avg_pool1d                               -     -      
+avg_pool1d                               -     yes    
 avg_pool2d                               -     yes    
 avg_pool2d_backward                      -     -      
 avg_pool3d                               -     -      
@@ -196,8 +196,8 @@ where.self                               -     -
 Summary
 total aten ops: 192
 supported by cref only: 1
-supported by codegen only: 21
+supported by codegen only: 22
 supported by both: 39
-unsupported by either: 131
-supported by codegen: 60 / 192 (31.2 %)
+unsupported by either: 130
+supported by codegen: 61 / 192 (31.8 %)
 supported by c-ref: 40 / 192 (20.8 %)

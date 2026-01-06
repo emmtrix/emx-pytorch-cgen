@@ -162,6 +162,18 @@ def _normalize_pool2d_param(value):
     return None
 
 
+def _normalize_pool1d_param(value):
+    if isinstance(value, int):
+        return value
+    if (
+        isinstance(value, (tuple, list))
+        and len(value) == 1
+        and all(isinstance(item, int) for item in value)
+    ):
+        return value[0]
+    return None
+
+
 def _convolution_sample_filter(sample):
     if not isinstance(sample.input, torch.Tensor):
         return False
@@ -209,6 +221,87 @@ def _convolution_sample_filter(sample):
     if sample.input.shape[1] != weight.shape[1] * groups:
         return False
     if weight.shape[0] % groups != 0:
+        return False
+    return True
+
+
+def _max_pool1d_sample_filter(sample):
+    if not isinstance(sample.input, torch.Tensor):
+        return False
+    if sample.input.ndim != 3:
+        return False
+    if not sample.input.is_contiguous():
+        return False
+    args = list(sample.args)
+    kernel_size = args[0] if len(args) > 0 else sample.kwargs.get("kernel_size")
+    stride = args[1] if len(args) > 1 else sample.kwargs.get("stride")
+    padding = args[2] if len(args) > 2 else sample.kwargs.get("padding", 0)
+    dilation = args[3] if len(args) > 3 else sample.kwargs.get("dilation", 1)
+    ceil_mode = args[4] if len(args) > 4 else sample.kwargs.get("ceil_mode", False)
+    kernel_value = _normalize_pool1d_param(kernel_size)
+    if kernel_value is None:
+        return False
+    if stride is None:
+        stride_value = kernel_value
+    else:
+        stride_value = _normalize_pool1d_param(stride)
+        if stride_value is None:
+            return False
+    padding_value = _normalize_pool1d_param(padding)
+    dilation_value = _normalize_pool1d_param(dilation)
+    if padding_value is None or dilation_value is None:
+        return False
+    if (
+        kernel_value <= 0
+        or stride_value <= 0
+        or dilation_value <= 0
+        or padding_value < 0
+    ):
+        return False
+    if ceil_mode:
+        return False
+    return True
+
+
+def _avg_pool1d_sample_filter(sample):
+    if not isinstance(sample.input, torch.Tensor):
+        return False
+    if sample.input.ndim != 3:
+        return False
+    if not sample.input.is_contiguous():
+        return False
+    args = list(sample.args)
+    kernel_size = args[0] if len(args) > 0 else sample.kwargs.get("kernel_size")
+    stride = args[1] if len(args) > 1 else sample.kwargs.get("stride")
+    padding = args[2] if len(args) > 2 else sample.kwargs.get("padding", 0)
+    ceil_mode = args[3] if len(args) > 3 else sample.kwargs.get("ceil_mode", False)
+    count_include_pad = (
+        args[4] if len(args) > 4 else sample.kwargs.get("count_include_pad", False)
+    )
+    divisor_override = (
+        args[5] if len(args) > 5 else sample.kwargs.get("divisor_override", None)
+    )
+    kernel_value = _normalize_pool1d_param(kernel_size)
+    if kernel_value is None:
+        return False
+    if stride is None:
+        stride_value = kernel_value
+    else:
+        stride_value = _normalize_pool1d_param(stride)
+        if stride_value is None:
+            return False
+    padding_value = _normalize_pool1d_param(padding)
+    if padding_value is None:
+        return False
+    if kernel_value <= 0 or stride_value <= 0 or padding_value < 0:
+        return False
+    if ceil_mode:
+        return False
+    if not isinstance(count_include_pad, bool):
+        return False
+    if divisor_override is not None and (
+        not isinstance(divisor_override, int) or divisor_override <= 0
+    ):
         return False
     return True
 
@@ -392,6 +485,7 @@ CODEGEN_ATEN_OPS = [
     torch.ops.aten.conv1d.default,
     torch.ops.aten.conv2d.default,
     torch.ops.aten.convolution.default,
+    torch.ops.aten.avg_pool1d.default,
     torch.ops.aten.avg_pool2d.default,
     torch.ops.aten.cos.default,
     torch.ops.aten.cosh.default,
@@ -448,6 +542,7 @@ CODEGEN_ATEN_OPS = [
     torch.ops.aten.addmv.default,
     torch.ops.aten.addr.default,
     torch.ops.aten.matmul.default,
+    torch.ops.aten.max_pool1d.default,
     torch.ops.aten.max_pool2d.default,
     torch.ops.aten.maximum.default,
     torch.ops.aten.minimum.default,
@@ -820,6 +915,14 @@ CODEGEN_OP_TEST_CONFIG = {
         "requires_contiguous": True,
         "sample_filter": _convolution_sample_filter,
     },
+    torch.ops.aten.avg_pool1d.default: {
+        "allowed_dtypes": (torch.float32,),
+        "allow_non_tensor_args": True,
+        "allow_kwargs": True,
+        "requires_same_shape": False,
+        "requires_contiguous": True,
+        "sample_filter": _avg_pool1d_sample_filter,
+    },
     torch.ops.aten.avg_pool2d.default: {
         "allowed_dtypes": (torch.float32,),
         "allow_non_tensor_args": True,
@@ -827,6 +930,14 @@ CODEGEN_OP_TEST_CONFIG = {
         "requires_same_shape": False,
         "requires_contiguous": True,
         "sample_filter": _avg_pool2d_sample_filter,
+    },
+    torch.ops.aten.max_pool1d.default: {
+        "allowed_dtypes": (torch.float32,),
+        "allow_non_tensor_args": True,
+        "allow_kwargs": True,
+        "requires_same_shape": False,
+        "requires_contiguous": True,
+        "sample_filter": _max_pool1d_sample_filter,
     },
     torch.ops.aten.max_pool2d.default: {
         "allowed_dtypes": (torch.float32,),
