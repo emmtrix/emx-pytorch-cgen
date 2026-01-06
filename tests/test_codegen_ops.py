@@ -6,6 +6,7 @@ import sys
 import pytest
 import torch
 from codegen_backend import codegen_generic_backend
+from codegen_backend.param_normalize import normalize_int_or_pair, normalize_int_or_tuple
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, ops
 from torch.testing._internal.common_methods_invocations import SampleInput, op_db
 from torch.testing._internal.common_utils import TestCase
@@ -244,39 +245,24 @@ def _resize_sample_filter(sample):
 
 
 def _normalize_conv2d_param(value):
-    if isinstance(value, int):
-        return (value, value)
-    if (
-        isinstance(value, (tuple, list))
-        and len(value) == 2
-        and all(isinstance(item, int) for item in value)
-    ):
-        return (value[0], value[1])
-    return None
+    try:
+        return normalize_int_or_pair("value", value)
+    except ValueError:
+        return None
 
 
 def _normalize_pool2d_param(value):
-    if isinstance(value, int):
-        return (value, value)
-    if (
-        isinstance(value, (tuple, list))
-        and len(value) == 2
-        and all(isinstance(item, int) for item in value)
-    ):
-        return (value[0], value[1])
-    return None
+    try:
+        return normalize_int_or_pair("value", value)
+    except ValueError:
+        return None
 
 
 def _normalize_pool1d_param(value):
-    if isinstance(value, int):
-        return value
-    if (
-        isinstance(value, (tuple, list))
-        and len(value) == 1
-        and all(isinstance(item, int) for item in value)
-    ):
-        return value[0]
-    return None
+    try:
+        return normalize_int_or_tuple("value", value, 1)[0]
+    except ValueError:
+        return None
 
 
 def _convolution_sample_filter(sample):
