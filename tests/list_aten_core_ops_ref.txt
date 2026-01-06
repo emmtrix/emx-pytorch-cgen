@@ -41,7 +41,7 @@ avg_pool1d                               -     yes
 avg_pool2d                               -     yes    
 avg_pool2d_backward                      -     -      
 avg_pool3d                               -     -      
-bitwise_and.Scalar                       -     -      
+bitwise_and.Scalar                       -     yes    
 bitwise_and.Tensor                       -     yes    
 bitwise_not                              -     yes    
 bitwise_or.Scalar                        -     -      
