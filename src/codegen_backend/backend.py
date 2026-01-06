@@ -2826,6 +2826,36 @@ def _write_pdist_kernel(
     return rendered.strip().splitlines()
 
 
+def _write_cdist_kernel(
+    node_index: int,
+    op_spec: _OpSpec,
+    x1_shape: Sequence[int],
+    x2_shape: Sequence[int],
+    output_shape: Sequence[int],
+    dtype: _CodegenDType,
+) -> List[str]:
+    cdist_template = _get_template_env().get_template("cdist_kernel.c.j2")
+    n, m = x1_shape
+    r, _ = x2_shape
+    x1_suffix = _format_array_suffix(x1_shape)
+    x2_suffix = _format_array_suffix(x2_shape)
+    output_suffix = _format_array_suffix(output_shape)
+    signature = (
+        f"void node{node_index}_{op_spec.name}_{dtype.suffix}("
+        f"const {dtype.c_type} x1{x1_suffix}, "
+        f"const {dtype.c_type} x2{x2_suffix}, "
+        f"{dtype.c_type} out{output_suffix}) {{"
+    )
+    rendered = cdist_template.render(
+        signature=signature,
+        n=n,
+        r=r,
+        m=m,
+        c_type=dtype.c_type,
+    )
+    return rendered.strip().splitlines()
+
+
 def _write_conv1d_kernel(
     node_index: int,
     op_spec: _OpSpec,
@@ -6057,6 +6087,86 @@ def _handle_pdist_node(
     )
 
 
+def _handle_cdist_node(
+    node: torch.fx.Node,
+    op_spec: _OpSpec,
+    dtype_info: _CodegenDType,
+    shapes: Dict[torch.fx.Node, Tuple[int, ...]],
+    strides: Dict[torch.fx.Node, Tuple[int, ...]],
+    dtypes: Dict[torch.fx.Node, torch.dtype],
+) -> _OpNode:
+    if len(node.args) < 3:
+        raise RefBackendError(
+            "codegen _cdist_forward expects two inputs and a p value"
+        )
+    if len(node.args) > 4:
+        raise RefBackendError(
+            "codegen _cdist_forward expects at most four inputs"
+        )
+    if node.kwargs:
+        raise RefBackendError(
+            "codegen _cdist_forward expects positional args only"
+        )
+    x1_arg = node.args[0]
+    x2_arg = node.args[1]
+    p_value = node.args[2]
+    compute_mode = node.args[3] if len(node.args) > 3 else None
+    if not isinstance(x1_arg, torch.fx.Node) or x1_arg not in shapes:
+        raise _error_expected_tensor(op_spec.name)
+    if not isinstance(x2_arg, torch.fx.Node) or x2_arg not in shapes:
+        raise _error_expected_tensor(op_spec.name)
+    if dtype_info.torch_dtype is not torch.float32:
+        raise RefBackendError("codegen _cdist_forward supports only torch.float32")
+    if dtypes[x1_arg] is not torch.float32 or dtypes[x2_arg] is not torch.float32:
+        raise RefBackendError("codegen _cdist_forward supports only torch.float32")
+    if isinstance(p_value, torch.fx.Node):
+        raise RefBackendError("codegen _cdist_forward expects constant p value")
+    try:
+        p_value = float(p_value)
+    except (TypeError, ValueError) as exc:
+        raise RefBackendError(
+            "codegen _cdist_forward expects p to be a float"
+        ) from exc
+    if p_value != 2.0:
+        raise RefBackendError("codegen _cdist_forward supports only p=2")
+    if isinstance(compute_mode, torch.fx.Node):
+        raise RefBackendError(
+            "codegen _cdist_forward expects constant compute_mode value"
+        )
+    if compute_mode not in (None, 0):
+        raise RefBackendError(
+            "codegen _cdist_forward supports only compute_mode=None or 0"
+        )
+    x1_shape = shapes[x1_arg]
+    x2_shape = shapes[x2_arg]
+    if len(x1_shape) != 2 or len(x2_shape) != 2:
+        raise RefBackendError(
+            "codegen _cdist_forward expects 2D input tensors"
+        )
+    if x1_shape[1] != x2_shape[1]:
+        raise RefBackendError(
+            "codegen _cdist_forward expects matching feature dimensions"
+        )
+    if not _is_contiguous(x1_shape, strides[x1_arg]) or not _is_contiguous(
+        x2_shape, strides[x2_arg]
+    ):
+        raise RefBackendError(
+            "codegen _cdist_forward requires contiguous inputs"
+        )
+    output_shape = (x1_shape[0], x2_shape[0])
+    shapes[node] = output_shape
+    dtypes[node] = dtype_info.torch_dtype
+    strides[node] = _contiguous_strides(output_shape)
+    return _OpNode(
+        node=node,
+        spec=op_spec,
+        inputs=[x1_arg, x2_arg],
+        output_shape=output_shape,
+        inplace_input=None,
+        params={},
+    )
+
+
 def _handle_addmm_like_node(
     node: torch.fx.Node,
     op_spec: _OpSpec,
@@ -7310,6 +7420,13 @@ def _analyze_generic_graph(
             if op_spec.kind == "pdist":
                 op_nodes.append(
                     _handle_pdist_node(
+                        node, op_spec, dtype_info, shapes, strides, dtypes
+                    )
+                )
+                continue
+            if op_spec.kind == "cdist":
+                op_nodes.append(
+                    _handle_cdist_node(
                         node, op_spec, dtype_info, shapes, strides, dtypes
                     )
                 )
