@@ -1,0 +1,44 @@
+{{ signature }}
+    for (int64_t n = 0; n < {{ batch }}; ++n) {
+        for (int64_t c = 0; c < {{ channels }}; ++c) {
+            for (int64_t ol = 0; ol < {{ out_l }}; ++ol) {
+                int64_t in_l_base = ol * {{ stride }} - {{ padding }};
+                {% if pool_kind == "max_pool1d" %}
+                bool has_value = false;
+                {{ c_type }} max_val = 0;
+                for (int64_t kl = 0; kl < {{ k_l }}; ++kl) {
+                    int64_t in_l_idx = in_l_base + kl * {{ dilation }};
+                    if (in_l_idx < 0 || in_l_idx >= {{ in_l }}) {
+                        continue;
+                    }
+                    {{ c_type }} val = input[n][c][in_l_idx];
+                    if (!has_value || val > max_val) {
+                        max_val = val;
+                        has_value = true;
+                    }
+                }
+                out[n][c][ol] = max_val;
+                {% else %}
+                {{ c_type }} acc = 0;
+                int64_t count = 0;
+                for (int64_t kl = 0; kl < {{ k_l }}; ++kl) {
+                    int64_t in_l_idx = in_l_base + kl * {{ dilation }};
+                    if (in_l_idx < 0 || in_l_idx >= {{ in_l }}) {
+                        continue;
+                    }
+                    acc += input[n][c][in_l_idx];
+                    count += 1;
+                }
+                {% if has_divisor_override %}
+                int64_t divisor = {{ divisor_override }};
+                {% elif count_include_pad %}
+                int64_t divisor = {{ k_l }};
+                {% else %}
+                int64_t divisor = count;
+                {% endif %}
+                out[n][c][ol] = acc / ({{ c_type }})divisor;
+                {% endif %}
+            }
+        }
+    }
+}
