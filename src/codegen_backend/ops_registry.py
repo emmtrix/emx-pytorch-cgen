@@ -16,6 +16,7 @@ _VALID_KINDS = {
     "softmax",
     "cumsum",
     "concat",
+    "diagonal",
     "addmm",
     "addbmm",
     "addmv",
@@ -1270,6 +1271,11 @@ _REGISTRY.register_op("cat", kind="concat").targets(
     torch.cat,
     torch.ops.aten.cat.default,
     torch.ops.aten.cat,
+).build()
+_REGISTRY.register_op("diagonal", kind="diagonal").targets(
+    torch.diagonal,
+    torch.ops.aten.diagonal.default,
+    torch.ops.aten.diagonal,
 ).build()
 _REGISTRY.register_op("addmm", kind="addmm").targets(
     torch.addmm,
