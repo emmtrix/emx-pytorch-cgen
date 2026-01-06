@@ -39,7 +39,7 @@ atan2.out                                -     -
 atanh                                    yes   yes    
 avg_pool1d                               -     yes    
 avg_pool2d                               -     yes    
-avg_pool2d_backward                      -     -      
+avg_pool2d_backward                      -     yes    
 avg_pool3d                               -     -      
 bitwise_and.Scalar                       -     yes    
 bitwise_and.Tensor                       -     yes    
@@ -196,8 +196,8 @@ where.self                               -     yes
 Summary
 total aten ops: 192
 supported by cref only: 0
-supported by codegen only: 79
+supported by codegen only: 80
 supported by both: 49
-unsupported by either: 64
-supported by codegen: 128 / 192 (66.7 %)
+unsupported by either: 63
+supported by codegen: 129 / 192 (67.2 %)
 supported by c-ref: 49 / 192 (25.5 %)

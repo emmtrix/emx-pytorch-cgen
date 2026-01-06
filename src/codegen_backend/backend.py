@@ -101,6 +101,21 @@ _FLOAT_ONLY_UNARY_OPS = {
     "hardtanh",
 }
 
+_AVG_POOL2D_BACKWARD_SPEC = _OpSpec(
+    name="avg_pool2d_backward",
+    kind="pool2d_backward",
+    symbol=None,
+    supported_targets={
+        torch.ops.aten.avg_pool2d_backward,
+        torch.ops.aten.avg_pool2d_backward.default,
+    },
+)
+
+SUPPORTED_OPS = {
+    **SUPPORTED_OPS,
+    _AVG_POOL2D_BACKWARD_SPEC.name: _AVG_POOL2D_BACKWARD_SPEC,
+}
+
 _TEMPLATE_ENV: Environment | None = None
 
 
@@ -2367,6 +2382,56 @@ def _write_pool2d_kernel(
     return rendered.strip().splitlines()
 
 
+def _write_avg_pool2d_backward_kernel(
+    node_index: int,
+    op_spec: _OpSpec,
+    grad_output_shape: Sequence[int],
+    input_shape: Sequence[int],
+    kernel_size: Tuple[int, int],
+    stride: Tuple[int, int],
+    padding: Tuple[int, int],
+    dtype: _CodegenDType,
+    count_include_pad: bool,
+    divisor_override: int | None,
+) -> List[str]:
+    backward_template = _get_template_env().get_template(
+        "avg_pool2d_backward_kernel.c.j2"
+    )
+    batch, channels, in_h, in_w = input_shape
+    out_h, out_w = grad_output_shape[2], grad_output_shape[3]
+    k_h, k_w = kernel_size
+    stride_h, stride_w = stride
+    pad_h, pad_w = padding
+    grad_output_suffix = _format_array_suffix(grad_output_shape)
+    input_suffix = _format_array_suffix(input_shape)
+    signature = (
+        f"void node{node_index}_{op_spec.name}_{dtype.suffix}("
+        f"const {dtype.c_type} grad_output{grad_output_suffix}, "
+        f"const {dtype.c_type} input{input_suffix}, "
+        f"{dtype.c_type} out{input_suffix}) {{"
+    )
+    rendered = backward_template.render(
+        signature=signature,
+        batch=batch,
+        channels=channels,
+        in_h=in_h,
+        in_w=in_w,
+        out_h=out_h,
+        out_w=out_w,
+        k_h=k_h,
+        k_w=k_w,
+        stride_h=stride_h,
+        stride_w=stride_w,
+        pad_h=pad_h,
+        pad_w=pad_w,
+        c_type=dtype.c_type,
+        count_include_pad=count_include_pad,
+        divisor_override=divisor_override,
+        has_divisor_override=divisor_override is not None,
+    )
+    return rendered.strip().splitlines()
+
+
 def _write_pool1d_kernel(
     node_index: int,
     op_spec: _OpSpec,
@@ -2732,6 +2797,20 @@ def _write_generic_source(graph: _GenericGraph) -> str:
                 op_node.p("dilation", (1, 1)),
                 graph.dtype,
                 bool(op_node.p("ceil_mode", False)),
+                bool(op_node.p("count_include_pad", False)),
+                op_node.p("divisor_override"),
+            )
+        elif op_node.spec.kind == "pool2d_backward":
+            grad_output_node, input_node = op_node.inputs
+            kernel_lines = _write_avg_pool2d_backward_kernel(
+                index,
+                op_node.spec,
+                graph.shapes[grad_output_node],
+                graph.shapes[input_node],
+                op_node.p("kernel_size", (1, 1)),
+                op_node.p("stride", (1, 1)),
+                op_node.p("padding", (0, 0)),
+                graph.dtype,
                 bool(op_node.p("count_include_pad", False)),
                 op_node.p("divisor_override"),
             )
@@ -4604,6 +4683,122 @@ def _parse_avg_pool2d_args(
     )
 
 
+def _parse_avg_pool2d_backward_args(
+    node: torch.fx.Node,
+) -> Tuple[
+    torch.fx.Node,
+    torch.fx.Node,
+    object,
+    object,
+    object,
+    object,
+    object,
+    object,
+]:
+    args = list(node.args)
+    kwargs = dict(node.kwargs)
+    if len(args) < 2 or len(args) > 8:
+        raise RefBackendError(
+            "codegen avg_pool2d_backward expects grad_output, self, and pooling arguments"
+        )
+    grad_output = args[0]
+    input_arg = args[1]
+    kernel_size = args[2] if len(args) > 2 else None
+    stride = args[3] if len(args) > 3 else None
+    padding = args[4] if len(args) > 4 else None
+    ceil_mode = args[5] if len(args) > 5 else None
+    count_include_pad = args[6] if len(args) > 6 else None
+    divisor_override = args[7] if len(args) > 7 else None
+    if kwargs:
+        extra = set(kwargs) - {
+            "grad_output",
+            "self",
+            "kernel_size",
+            "stride",
+            "padding",
+            "ceil_mode",
+            "count_include_pad",
+            "divisor_override",
+        }
+        if extra:
+            raise RefBackendError(
+                "codegen avg_pool2d_backward got unexpected kwargs: "
+                f"{sorted(extra)}"
+            )
+        if "grad_output" in kwargs:
+            if len(args) > 0:
+                raise _error_kwarg_specified_once(
+                    "avg_pool2d_backward", "grad_output"
+                )
+            grad_output = kwargs["grad_output"]
+        if "self" in kwargs:
+            if len(args) > 1:
+                raise _error_kwarg_specified_once("avg_pool2d_backward", "self")
+            input_arg = kwargs["self"]
+        if "kernel_size" in kwargs:
+            if len(args) > 2:
+                raise _error_kwarg_specified_once(
+                    "avg_pool2d_backward", "kernel_size"
+                )
+            kernel_size = kwargs["kernel_size"]
+        if "stride" in kwargs:
+            if len(args) > 3:
+                raise _error_kwarg_specified_once(
+                    "avg_pool2d_backward", "stride"
+                )
+            stride = kwargs["stride"]
+        if "padding" in kwargs:
+            if len(args) > 4:
+                raise _error_kwarg_specified_once(
+                    "avg_pool2d_backward", "padding"
+                )
+            padding = kwargs["padding"]
+        if "ceil_mode" in kwargs:
+            if len(args) > 5:
+                raise _error_kwarg_specified_once(
+                    "avg_pool2d_backward", "ceil_mode"
+                )
+            ceil_mode = kwargs["ceil_mode"]
+        if "count_include_pad" in kwargs:
+            if len(args) > 6:
+                raise _error_kwarg_specified_once(
+                    "avg_pool2d_backward", "count_include_pad"
+                )
+            count_include_pad = kwargs["count_include_pad"]
+        if "divisor_override" in kwargs:
+            if len(args) > 7:
+                raise _error_kwarg_specified_once(
+                    "avg_pool2d_backward", "divisor_override"
+                )
+            divisor_override = kwargs["divisor_override"]
+    if kernel_size is None:
+        raise RefBackendError(
+            "codegen avg_pool2d_backward expects kernel_size argument"
+        )
+    if stride is None:
+        raise RefBackendError("codegen avg_pool2d_backward expects stride argument")
+    if padding is None:
+        raise RefBackendError("codegen avg_pool2d_backward expects padding argument")
+    if ceil_mode is None:
+        raise RefBackendError(
+            "codegen avg_pool2d_backward expects ceil_mode argument"
+        )
+    if count_include_pad is None:
+        raise RefBackendError(
+            "codegen avg_pool2d_backward expects count_include_pad argument"
+        )
+    return (
+        grad_output,
+        input_arg,
+        kernel_size,
+        stride,
+        padding,
+        ceil_mode,
+        count_include_pad,
+        divisor_override,
+    )
+
+
 def _handle_concat_node(
     node: torch.fx.Node,
     op_spec: _OpSpec,
@@ -5306,6 +5501,124 @@ def _handle_pool2d_node(
             "padding": padding_pair,
             "dilation": dilation_pair,
             "ceil_mode": bool(ceil_mode),
+            "count_include_pad": count_include_pad,
+            "divisor_override": divisor_override,
+        },
+    )
+
+
+def _handle_pool2d_backward_node(
+    node: torch.fx.Node,
+    op_spec: _OpSpec,
+    dtype_info: _CodegenDType,
+    shapes: Dict[torch.fx.Node, Tuple[int, ...]],
+    strides: Dict[torch.fx.Node, Tuple[int, ...]],
+    dtypes: Dict[torch.fx.Node, torch.dtype],
+) -> _OpNode:
+    (
+        grad_output,
+        input_arg,
+        kernel_size,
+        stride,
+        padding,
+        ceil_mode,
+        count_include_pad,
+        divisor_override,
+    ) = _parse_avg_pool2d_backward_args(node)
+    if not isinstance(grad_output, torch.fx.Node) or grad_output not in shapes:
+        raise _error_expected_tensor(op_spec.name)
+    if not isinstance(input_arg, torch.fx.Node) or input_arg not in shapes:
+        raise _error_expected_tensor(op_spec.name)
+    if dtype_info.torch_dtype is not torch.float32:
+        raise RefBackendError(
+            f"codegen {op_spec.name} supports only torch.float32 tensors"
+        )
+    if dtypes[grad_output] is not torch.float32 or dtypes[input_arg] is not torch.float32:
+        raise RefBackendError(
+            f"codegen {op_spec.name} supports only torch.float32 tensors"
+        )
+    if isinstance(kernel_size, torch.fx.Node) or isinstance(
+        stride, torch.fx.Node
+    ) or isinstance(padding, torch.fx.Node):
+        raise RefBackendError(
+            f"codegen {op_spec.name} expects constant kernel, stride, and padding"
+        )
+    if isinstance(ceil_mode, torch.fx.Node) or isinstance(
+        count_include_pad, torch.fx.Node
+    ):
+        raise RefBackendError(
+            f"codegen {op_spec.name} expects constant pooling options"
+        )
+    if isinstance(divisor_override, torch.fx.Node):
+        raise RefBackendError(
+            f"codegen {op_spec.name} expects constant pooling options"
+        )
+    input_shape = shapes[input_arg]
+    if len(input_shape) != 4:
+        raise RefBackendError(
+            f"codegen {op_spec.name} requires 4D input tensors"
+        )
+    if not _is_contiguous(input_shape, strides[input_arg]):
+        raise RefBackendError(
+            f"codegen {op_spec.name} requires contiguous input tensors"
+        )
+    if not _is_contiguous(shapes[grad_output], strides[grad_output]):
+        raise RefBackendError(
+            f"codegen {op_spec.name} requires contiguous grad_output tensors"
+        )
+    kernel_pair = _normalize_pool2d_param("kernel_size", kernel_size)
+    stride_pair = _normalize_pool2d_param("stride", stride)
+    padding_pair = _normalize_pool2d_param("padding", padding)
+    if (
+        kernel_pair[0] <= 0
+        or kernel_pair[1] <= 0
+        or stride_pair[0] <= 0
+        or stride_pair[1] <= 0
+        or padding_pair[0] < 0
+        or padding_pair[1] < 0
+    ):
+        raise RefBackendError(
+            f"codegen {op_spec.name} expects positive kernel and stride with non-negative padding"
+        )
+    if ceil_mode:
+        raise RefBackendError(
+            f"codegen {op_spec.name} does not support ceil_mode"
+        )
+    if not isinstance(count_include_pad, bool):
+        raise RefBackendError(
+            f"codegen {op_spec.name} expects count_include_pad to be a bool"
+        )
+    if divisor_override is not None:
+        if not isinstance(divisor_override, int) or divisor_override <= 0:
+            raise RefBackendError(
+                f"codegen {op_spec.name} expects divisor_override to be a positive int"
+            )
+    expected_grad_shape = _pool2d_output_shape_from_shapes(
+        input_shape,
+        kernel_pair,
+        stride_pair,
+        padding_pair,
+        (1, 1),
+    )
+    grad_output_shape = shapes[grad_output]
+    if tuple(grad_output_shape) != tuple(expected_grad_shape):
+        raise RefBackendError(
+            f"codegen {op_spec.name} expects grad_output shape {expected_grad_shape} "
+            f"for input shape {input_shape}"
+        )
+    shapes[node] = input_shape
+    dtypes[node] = dtype_info.torch_dtype
+    strides[node] = _contiguous_strides(input_shape)
+    return _OpNode(
+        node=node,
+        spec=op_spec,
+        inputs=[grad_output, input_arg],
+        output_shape=input_shape,
+        inplace_input=None,
+        params={
+            "kernel_size": kernel_pair,
+            "stride": stride_pair,
+            "padding": padding_pair,
             "count_include_pad": count_include_pad,
             "divisor_override": divisor_override,
         },
@@ -6192,6 +6505,13 @@ def _analyze_generic_graph(
             if op_spec.kind == "pool2d":
                 op_nodes.append(
                     _handle_pool2d_node(
+                        node, op_spec, dtype_info, shapes, strides, dtypes
+                    )
+                )
+                continue
+            if op_spec.kind == "pool2d_backward":
+                op_nodes.append(
+                    _handle_pool2d_backward_node(
                         node, op_spec, dtype_info, shapes, strides, dtypes
                     )
                 )

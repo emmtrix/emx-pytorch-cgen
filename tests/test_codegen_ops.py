@@ -5,7 +5,11 @@ import pytest
 import torch
 from codegen_backend import codegen_generic_backend
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, ops
-from torch.testing._internal.common_methods_invocations import SampleInput, op_db
+from torch.testing._internal.common_methods_invocations import (
+    OpInfo,
+    SampleInput,
+    op_db,
+)
 from torch.testing._internal.common_utils import TestCase
 
 
@@ -50,6 +54,33 @@ def _update_sample(sample, updated_tensors):
         else:
             new_args.append(arg)
     return SampleInput(new_input, args=tuple(new_args), kwargs=sample.kwargs)
+
+
+def _avg_pool2d_backward_sample_inputs(op_info, device, dtype, requires_grad, **kwargs):
+    input_tensor = torch.randn(
+        1, 2, 4, 4, device=device, dtype=dtype, requires_grad=requires_grad
+    )
+    kernel_size = (2, 2)
+    stride = (2, 2)
+    padding = (0, 0)
+    ceil_mode = False
+    count_include_pad = False
+    divisor_override = None
+    grad_output = torch.randn(
+        1, 2, 2, 2, device=device, dtype=dtype, requires_grad=requires_grad
+    )
+    yield SampleInput(
+        grad_output,
+        args=(
+            input_tensor,
+            kernel_size,
+            stride,
+            padding,
+            ceil_mode,
+            count_include_pad,
+            divisor_override,
+        ),
+    )
 
 
 def _addmv_sample_filter(sample):
@@ -605,6 +636,7 @@ CODEGEN_ATEN_OPS = [
     torch.ops.aten.convolution.default,
     torch.ops.aten.avg_pool1d.default,
     torch.ops.aten.avg_pool2d.default,
+    torch.ops.aten.avg_pool2d_backward.default,
     torch.ops.aten.cos.default,
     torch.ops.aten.cosh.default,
     torch.ops.aten.cumsum.default,
@@ -897,6 +929,16 @@ def _clone_tensor_scalar_opinfo(aten_name, variant_test_name=""):
     )
 
 
+AVG_POOL2D_BACKWARD_OPINFO = OpInfo(
+    "avg_pool2d_backward",
+    op=torch.ops.aten.avg_pool2d_backward.default,
+    aten_name="avg_pool2d_backward",
+    dtypes=(torch.float32,),
+    sample_inputs_func=_avg_pool2d_backward_sample_inputs,
+    supports_autograd=False,
+)
+
+
 CODEGEN_OPINFO_OVERRIDES = {
     torch.ops.aten.div.Tensor: _lookup_opinfo("div", "no_rounding_mode"),
     torch.ops.aten.div.Scalar: _clone_scalar_opinfo("div", "no_rounding_mode"),
@@ -943,6 +985,7 @@ CODEGEN_OPINFO_OVERRIDES = {
         name="aten.convolution",
         aten_name="convolution",
     ),
+    torch.ops.aten.avg_pool2d_backward.default: AVG_POOL2D_BACKWARD_OPINFO,
 }
 
 
@@ -1106,6 +1149,11 @@ CODEGEN_OP_TEST_CONFIG = {
     torch.ops.aten.avg_pool2d.default: {
         "allowed_dtypes": (torch.float32,),
         "sample_filter": _avg_pool2d_sample_filter,
+    },
+    torch.ops.aten.avg_pool2d_backward.default: {
+        "allowed_dtypes": (torch.float32,),
+        "allow_noncontiguous": False,
+        "requires_contiguous": True,
     },
     torch.ops.aten.max_pool1d.default: {
         "allowed_dtypes": (torch.float32,),
