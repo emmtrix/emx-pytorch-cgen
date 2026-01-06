@@ -957,7 +957,7 @@ def emit_body(
         broadcast_contiguous=False,
         c_type=_input_c_type(input_dtypes[0], dtype),
     )
-    if op_spec.name in {"clone", "_to_copy"}:
+    if op_spec.name in {"clone", "_to_copy", "resize_"}:
         return [f"{indent}{output_access} = {input_access};"]
     if op_spec.name in _PARAMETRIC_UNARY_OPS:
         return _emit_parametric_unary(
@@ -5662,6 +5662,68 @@ def _handle_fill_node(
     )
 
 
+def _parse_resize_size(op_name: str, size_value: object) -> Tuple[int, ...]:
+    if isinstance(size_value, torch.Size):
+        size_value = tuple(size_value)
+    if isinstance(size_value, (list, tuple)):
+        try:
+            return tuple(int(operator.index(item)) for item in size_value)
+        except TypeError as exc:
+            raise RefBackendError(
+                f"codegen {op_name} expects size values to be integers"
+            ) from exc
+    raise RefBackendError(f"codegen {op_name} expects size to be a sequence")
+
+
+def _handle_resize_node(
+    node: torch.fx.Node,
+    op_spec: _OpSpec,
+    dtype_info: _CodegenDType,
+    shapes: Dict[torch.fx.Node, Tuple[int, ...]],
+    strides: Dict[torch.fx.Node, Tuple[int, ...]],
+    dtypes: Dict[torch.fx.Node, torch.dtype],
+    inplace_input: int | None,
+) -> _OpNode:
+    if node.kwargs:
+        if (
+            set(node.kwargs) != {"memory_format"}
+            or node.kwargs["memory_format"] is not None
+        ):
+            raise RefBackendError(
+                "codegen resize_ supports only memory_format=None"
+            )
+    if len(node.args) != 2:
+        raise RefBackendError("codegen resize_ expects input and size arguments")
+    input_arg, size_arg = node.args
+    if not isinstance(input_arg, torch.fx.Node):
+        raise _error_expected_tensor(op_spec.name)
+    if input_arg not in shapes:
+        raise _error_expected_tensor(op_spec.name)
+    if dtypes[input_arg] is not dtype_info.torch_dtype:
+        raise RefBackendError(
+            "codegen resize_ expects inputs to share the graph dtype"
+        )
+    size = _parse_resize_size(op_spec.name, size_arg)
+    input_shape = shapes[input_arg]
+    if size != input_shape:
+        raise RefBackendError(
+            "codegen resize_ supports only size values that match the input shape"
+        )
+    shapes[node] = input_shape
+    dtypes[node] = dtype_info.torch_dtype
+    if inplace_input is not None:
+        strides[node] = strides[input_arg]
+    else:
+        strides[node] = _contiguous_strides(input_shape)
+    return _OpNode(
+        node=node,
+        spec=op_spec,
+        inputs=[input_arg],
+        output_shape=input_shape,
+        inplace_input=inplace_input,
+    )
+
+
 def _analyze_generic_graph(
     gm: torch.fx.GraphModule, example_inputs: Sequence[object]
 ) -> _GenericGraph:
@@ -5868,6 +5930,19 @@ def _analyze_generic_graph(
             elif op_spec.kind == "fill":
                 op_nodes.append(
                     _handle_fill_node(
+                        node,
+                        op_spec,
+                        dtype_info,
+                        shapes,
+                        strides,
+                        dtypes,
+                        inplace_input,
+                    )
+                )
+                continue
+            elif op_spec.name == "resize_":
+                op_nodes.append(
+                    _handle_resize_node(
                         node,
                         op_spec,
                         dtype_info,

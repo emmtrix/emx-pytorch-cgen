@@ -175,6 +175,29 @@ def _cumsum_sample_filter(sample):
     return True
 
 
+def _resize_sample_filter(sample):
+    if not isinstance(sample.input, torch.Tensor):
+        return False
+    if sample.kwargs.get("memory_format") is not None:
+        return False
+    size_value = None
+    if sample.args:
+        size_value = sample.args[0]
+    else:
+        size_value = sample.kwargs.get("size")
+    if size_value is None:
+        return False
+    if isinstance(size_value, torch.Size):
+        size_value = tuple(size_value)
+    if not isinstance(size_value, (list, tuple)):
+        return False
+    try:
+        size_tuple = tuple(int(operator.index(item)) for item in size_value)
+    except TypeError:
+        return False
+    return size_tuple == tuple(sample.input.shape)
+
+
 def _normalize_conv2d_param(value):
     if isinstance(value, int):
         return (value, value)
@@ -649,6 +672,7 @@ CODEGEN_ATEN_OPS = [
     torch.ops.aten.permute.default,
     torch.ops.aten.view.default,
     torch.ops.aten.reshape.default,
+    torch.ops.aten.resize_.default,
     torch.ops.aten.unsqueeze.default,
     torch.ops.aten.select.int,
     torch.ops.aten.narrow.default,
@@ -1117,6 +1141,11 @@ CODEGEN_OP_TEST_CONFIG = {
         "allow_non_tensor_args": True,
         "allow_kwargs": True,
         "requires_same_shape": False,
+    },
+    torch.ops.aten.resize_.default: {
+        "allow_non_tensor_args": True,
+        "allow_kwargs": True,
+        "sample_filter": _resize_sample_filter,
     },
     torch.ops.aten.cumsum.default: {
         "allowed_dtypes": (torch.float32, torch.int8, torch.int32),
