@@ -446,6 +446,28 @@ class Pool1dHandler(KindHandler):
         )
 
 
+class Pool3dHandler(KindHandler):
+    def emit_kernel(
+        self, node_index: int, op_node: _OpNode, graph: _GenericGraph
+    ) -> List[str]:
+        backend = _backend_module()
+        input_node = op_node.inputs[0]
+        return backend._write_pool3d_kernel(
+            node_index,
+            op_node.spec,
+            graph.shapes[input_node],
+            op_node.output_shape,
+            op_node.p("kernel_size", (1, 1, 1)),
+            op_node.p("stride", (1, 1, 1)),
+            op_node.p("padding", (0, 0, 0)),
+            op_node.p("dilation", (1, 1, 1)),
+            graph.dtype,
+            bool(op_node.p("ceil_mode", False)),
+            bool(op_node.p("count_include_pad", False)),
+            op_node.p("divisor_override"),
+        )
+
+
 class Col2imHandler(KindHandler):
     def emit_kernel(
         self, node_index: int, op_node: _OpNode, graph: _GenericGraph
@@ -851,6 +873,7 @@ def build_kind_handlers() -> Dict[str, KindHandler]:
         "concat": ConcatHandler(),
         "pool2d": Pool2dHandler(),
         "pool1d": Pool1dHandler(),
+        "pool3d": Pool3dHandler(),
         "col2im": Col2imHandler(),
         "batch_norm": BatchNormHandler(),
         "pdist": PdistHandler(),

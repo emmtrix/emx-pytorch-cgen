@@ -30,6 +30,7 @@ _VALID_KINDS = {
     "conv2d",
     "pool1d",
     "pool2d",
+    "pool3d",
     "embedding",
     "gather",
     "batch_norm",
@@ -1513,6 +1514,11 @@ _REGISTRY.register_op("avg_pool2d", kind="pool2d").targets(
     F.avg_pool2d,
     torch.ops.aten.avg_pool2d.default,
     torch.ops.aten.avg_pool2d,
+).build()
+_REGISTRY.register_op("avg_pool3d", kind="pool3d").targets(
+    F.avg_pool3d,
+    torch.ops.aten.avg_pool3d.default,
+    torch.ops.aten.avg_pool3d,
 ).build()
 _REGISTRY.register_op("max_pool2d", kind="pool2d").targets(
     F.max_pool2d,

@@ -219,6 +219,13 @@ def _normalize_pool2d_param(value):
         return None
 
 
+def _normalize_pool3d_param(value):
+    try:
+        return normalize_int_or_tuple("value", value, 3)
+    except ValueError:
+        return None
+
+
 def _normalize_pool1d_param(value):
     try:
         return normalize_int_or_tuple("value", value, 1)[0]
@@ -450,6 +457,59 @@ def _avg_pool2d_sample_filter(sample):
     return True
 
 
+def _avg_pool3d_sample_filter(sample):
+    if not isinstance(sample.input, torch.Tensor):
+        return False
+    if sample.input.ndim != 5:
+        return False
+    if not sample.input.is_contiguous():
+        return False
+    args = list(sample.args)
+    kernel_size = args[0] if len(args) > 0 else sample.kwargs.get("kernel_size")
+    stride = args[1] if len(args) > 1 else sample.kwargs.get("stride")
+    padding = args[2] if len(args) > 2 else sample.kwargs.get("padding", 0)
+    ceil_mode = args[3] if len(args) > 3 else sample.kwargs.get("ceil_mode", False)
+    count_include_pad = (
+        args[4] if len(args) > 4 else sample.kwargs.get("count_include_pad", False)
+    )
+    divisor_override = (
+        args[5] if len(args) > 5 else sample.kwargs.get("divisor_override", None)
+    )
+    kernel_triplet = _normalize_pool3d_param(kernel_size)
+    if kernel_triplet is None:
+        return False
+    if stride is None:
+        stride_triplet = kernel_triplet
+    else:
+        stride_triplet = _normalize_pool3d_param(stride)
+        if stride_triplet is None:
+            return False
+    padding_triplet = _normalize_pool3d_param(padding)
+    if padding_triplet is None:
+        return False
+    if (
+        kernel_triplet[0] <= 0
+        or kernel_triplet[1] <= 0
+        or kernel_triplet[2] <= 0
+        or stride_triplet[0] <= 0
+        or stride_triplet[1] <= 0
+        or stride_triplet[2] <= 0
+        or padding_triplet[0] < 0
+        or padding_triplet[1] < 0
+        or padding_triplet[2] < 0
+    ):
+        return False
+    if ceil_mode:
+        return False
+    if not isinstance(count_include_pad, bool):
+        return False
+    if divisor_override is not None and (
+        not isinstance(divisor_override, int) or divisor_override <= 0
+    ):
+        return False
+    return True
+
+
 def _sample_matches_constraints(sample, dtype, constraints):
     tensors = _extract_tensors(sample)
     if not tensors:
@@ -557,6 +617,7 @@ CODEGEN_ATEN_OPS = [
     torch.ops.aten.convolution.default,
     torch.ops.aten.avg_pool1d.default,
     torch.ops.aten.avg_pool2d.default,
+    torch.ops.aten.avg_pool3d.default,
     torch.ops.aten.cos.default,
     torch.ops.aten.cosh.default,
     torch.ops.aten.cumsum.default,
@@ -1111,6 +1172,10 @@ CODEGEN_OP_TEST_CONFIG = {
     torch.ops.aten.avg_pool2d.default: {
         "allowed_dtypes": (torch.float32,),
         "sample_filter": _avg_pool2d_sample_filter,
+    },
+    torch.ops.aten.avg_pool3d.default: {
+        "allowed_dtypes": (torch.float32,),
+        "sample_filter": _avg_pool3d_sample_filter,
     },
     torch.ops.aten.max_pool1d.default: {
         "allowed_dtypes": (torch.float32,),
