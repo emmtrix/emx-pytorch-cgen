@@ -360,6 +360,48 @@ def _normalize_pool2d_param(name: str, value: object) -> Tuple[int, int]:
     raise RefBackendError(f"pool2d expects {name} to be an int or a pair of ints")
 
 
+def _normalize_col2im_output_size(
+    op_name: str, value: object
+) -> Tuple[int, int]:
+    if isinstance(value, torch.Size):
+        value = tuple(value)
+    if not isinstance(value, (list, tuple)) or len(value) != 2:
+        raise RefBackendError(
+            f"codegen {op_name} expects output_size to be a tuple of two ints"
+        )
+    try:
+        return tuple(int(operator.index(item)) for item in value)
+    except TypeError as exc:
+        raise RefBackendError(
+            f"codegen {op_name} expects output_size to be a tuple of ints"
+        ) from exc
+
+
+def _normalize_col2im_pair(
+    op_name: str, name: str, value: object
+) -> Tuple[int, int]:
+    if isinstance(value, torch.Size):
+        value = tuple(value)
+    if isinstance(value, (list, tuple)):
+        if len(value) != 2:
+            raise RefBackendError(
+                f"codegen {op_name} expects {name} to be an int or a pair of ints"
+            )
+        try:
+            return tuple(int(operator.index(item)) for item in value)
+        except TypeError as exc:
+            raise RefBackendError(
+                f"codegen {op_name} expects {name} to be an int or a pair of ints"
+            ) from exc
+    try:
+        scalar = int(operator.index(value))
+    except TypeError as exc:
+        raise RefBackendError(
+            f"codegen {op_name} expects {name} to be an int or a pair of ints"
+        ) from exc
+    return (scalar, scalar)
+
+
 def _normalize_pool1d_param(name: str, value: object) -> int:
     if isinstance(value, int):
         return value
@@ -2411,6 +2453,61 @@ def _write_pool1d_kernel(
     return rendered.strip().splitlines()
 
 
+def _write_col2im_kernel(
+    node_index: int,
+    op_spec: _OpSpec,
+    input_shape: Sequence[int],
+    output_shape: Sequence[int],
+    output_size: Tuple[int, int],
+    kernel_size: Tuple[int, int],
+    dilation: Tuple[int, int],
+    padding: Tuple[int, int],
+    stride: Tuple[int, int],
+    dtype: _CodegenDType,
+    out_blocks_h: int,
+    out_blocks_w: int,
+) -> List[str]:
+    col2im_template = _get_template_env().get_template("col2im_kernel.c.j2")
+    if len(output_shape) == 4:
+        batch, channels, out_h, out_w = output_shape
+        has_batch = True
+    else:
+        channels, out_h, out_w = output_shape
+        batch = 1
+        has_batch = False
+    k_h, k_w = kernel_size
+    stride_h, stride_w = stride
+    pad_h, pad_w = padding
+    dil_h, dil_w = dilation
+    input_suffix = _format_array_suffix(input_shape)
+    output_suffix = _format_array_suffix(output_shape)
+    signature = (
+        f"void node{node_index}_{op_spec.name}_{dtype.suffix}("
+        f"const {dtype.c_type} input{input_suffix}, "
+        f"{dtype.c_type} out{output_suffix}) {{"
+    )
+    rendered = col2im_template.render(
+        signature=signature,
+        batch=batch,
+        channels=channels,
+        out_h=out_h,
+        out_w=out_w,
+        k_h=k_h,
+        k_w=k_w,
+        stride_h=stride_h,
+        stride_w=stride_w,
+        pad_h=pad_h,
+        pad_w=pad_w,
+        dil_h=dil_h,
+        dil_w=dil_w,
+        c_type=dtype.c_type,
+        out_blocks_h=out_blocks_h,
+        out_blocks_w=out_blocks_w,
+        has_batch=has_batch,
+    )
+    return rendered.strip().splitlines()
+
+
 def _write_batch_norm_kernel(
     node_index: int,
     op_spec: _OpSpec,
@@ -2750,6 +2847,22 @@ def _write_generic_source(graph: _GenericGraph) -> str:
                 bool(op_node.p("ceil_mode", False)),
                 bool(op_node.p("count_include_pad", False)),
                 op_node.p("divisor_override"),
+            )
+        elif op_node.spec.kind == "col2im":
+            input_node = op_node.inputs[0]
+            kernel_lines = _write_col2im_kernel(
+                index,
+                op_node.spec,
+                graph.shapes[input_node],
+                op_node.output_shape,
+                op_node.p("output_size", (1, 1)),
+                op_node.p("kernel_size", (1, 1)),
+                op_node.p("dilation", (1, 1)),
+                op_node.p("padding", (0, 0)),
+                op_node.p("stride", (1, 1)),
+                graph.dtype,
+                op_node.p("out_blocks_h", 1),
+                op_node.p("out_blocks_w", 1),
             )
         elif op_node.spec.kind == "batch_norm":
             input_node = op_node.inputs[0]
@@ -4334,6 +4447,57 @@ def _parse_conv1d_args(
     return (input_arg, weight_arg, bias, stride, padding, dilation, groups)
 
 
+def _parse_col2im_args(
+    node: torch.fx.Node,
+) -> Tuple[torch.fx.Node, object, object, object, object, object]:
+    args = list(node.args)
+    kwargs = dict(node.kwargs)
+    if len(args) < 1 or len(args) > 6:
+        raise RefBackendError(
+            "codegen col2im expects input, output_size, kernel_size, dilation, padding, and stride"
+        )
+    input_arg = args[0] if len(args) >= 1 else None
+    output_size = args[1] if len(args) >= 2 else None
+    kernel_size = args[2] if len(args) >= 3 else None
+    dilation = args[3] if len(args) >= 4 else None
+    padding = args[4] if len(args) >= 5 else None
+    stride = args[5] if len(args) >= 6 else None
+    if kwargs:
+        extra = set(kwargs) - {
+            "output_size",
+            "kernel_size",
+            "dilation",
+            "padding",
+            "stride",
+        }
+        if extra:
+            raise RefBackendError(
+                f"codegen col2im got unexpected kwargs: {sorted(extra)}"
+            )
+        if "output_size" in kwargs:
+            output_size = kwargs["output_size"]
+        if "kernel_size" in kwargs:
+            kernel_size = kwargs["kernel_size"]
+        if "dilation" in kwargs:
+            dilation = kwargs["dilation"]
+        if "padding" in kwargs:
+            padding = kwargs["padding"]
+        if "stride" in kwargs:
+            stride = kwargs["stride"]
+    if (
+        input_arg is None
+        or output_size is None
+        or kernel_size is None
+        or dilation is None
+        or padding is None
+        or stride is None
+    ):
+        raise RefBackendError(
+            "codegen col2im expects input, output_size, kernel_size, dilation, padding, and stride"
+        )
+    return input_arg, output_size, kernel_size, dilation, padding, stride
+
+
 def _parse_max_pool1d_args(
     node: torch.fx.Node,
 ) -> Tuple[torch.fx.Node, object, object, object, object, object]:
@@ -5312,6 +5476,130 @@ def _handle_pool2d_node(
     )
 
 
+def _handle_col2im_node(
+    node: torch.fx.Node,
+    op_spec: _OpSpec,
+    dtype_info: _CodegenDType,
+    shapes: Dict[torch.fx.Node, Tuple[int, ...]],
+    strides: Dict[torch.fx.Node, Tuple[int, ...]],
+    dtypes: Dict[torch.fx.Node, torch.dtype],
+) -> _OpNode:
+    (
+        input_arg,
+        output_size,
+        kernel_size,
+        dilation,
+        padding,
+        stride,
+    ) = _parse_col2im_args(node)
+    if not isinstance(input_arg, torch.fx.Node) or input_arg not in shapes:
+        raise _error_expected_tensor(op_spec.name)
+    if dtype_info.torch_dtype is not torch.float32:
+        raise RefBackendError(
+            "codegen col2im supports only torch.float32 tensors"
+        )
+    if dtypes[input_arg] is not torch.float32:
+        raise RefBackendError(
+            "codegen col2im supports only torch.float32 tensors"
+        )
+    if (
+        isinstance(output_size, torch.fx.Node)
+        or isinstance(kernel_size, torch.fx.Node)
+        or isinstance(dilation, torch.fx.Node)
+        or isinstance(padding, torch.fx.Node)
+        or isinstance(stride, torch.fx.Node)
+    ):
+        raise RefBackendError(
+            "codegen col2im expects constant output_size, kernel_size, dilation, padding, and stride"
+        )
+    output_pair = _normalize_col2im_output_size(op_spec.name, output_size)
+    kernel_pair = _normalize_col2im_pair(op_spec.name, "kernel_size", kernel_size)
+    dilation_pair = _normalize_col2im_pair(op_spec.name, "dilation", dilation)
+    padding_pair = _normalize_col2im_pair(op_spec.name, "padding", padding)
+    stride_pair = _normalize_col2im_pair(op_spec.name, "stride", stride)
+    if (
+        output_pair[0] <= 0
+        or output_pair[1] <= 0
+        or kernel_pair[0] <= 0
+        or kernel_pair[1] <= 0
+        or dilation_pair[0] <= 0
+        or dilation_pair[1] <= 0
+        or stride_pair[0] <= 0
+        or stride_pair[1] <= 0
+        or padding_pair[0] < 0
+        or padding_pair[1] < 0
+    ):
+        raise RefBackendError(
+            "codegen col2im expects positive output_size, kernel_size, stride, and dilation with non-negative padding"
+        )
+    input_shape = shapes[input_arg]
+    if len(input_shape) == 3:
+        batch, col_channels, col_length = input_shape
+        has_batch = True
+    elif len(input_shape) == 2:
+        col_channels, col_length = input_shape
+        batch = 1
+        has_batch = False
+    else:
+        raise RefBackendError("codegen col2im expects 2D or 3D input tensors")
+    if not _is_contiguous(input_shape, strides[input_arg]):
+        raise RefBackendError("codegen col2im requires contiguous input tensors")
+    k_h, k_w = kernel_pair
+    channels_divisor = k_h * k_w
+    if channels_divisor <= 0 or col_channels % channels_divisor != 0:
+        raise RefBackendError(
+            "codegen col2im expects input channels divisible by kernel_size"
+        )
+    out_h, out_w = output_pair
+    dil_h, dil_w = dilation_pair
+    pad_h, pad_w = padding_pair
+    stride_h, stride_w = stride_pair
+    effective_kh = dil_h * (k_h - 1) + 1
+    effective_kw = dil_w * (k_w - 1) + 1
+    numerator_h = out_h + 2 * pad_h - effective_kh
+    numerator_w = out_w + 2 * pad_w - effective_kw
+    if (
+        numerator_h < 0
+        or numerator_w < 0
+        or numerator_h % stride_h != 0
+        or numerator_w % stride_w != 0
+    ):
+        raise RefBackendError(
+            "codegen col2im expects output_size to be compatible with kernel_size, dilation, padding, and stride"
+        )
+    out_blocks_h = numerator_h // stride_h + 1
+    out_blocks_w = numerator_w // stride_w + 1
+    expected_length = out_blocks_h * out_blocks_w
+    if col_length != expected_length:
+        raise RefBackendError(
+            "codegen col2im expects input length to match output_size and stride"
+        )
+    channels = col_channels // channels_divisor
+    if has_batch:
+        output_shape = (batch, channels, out_h, out_w)
+    else:
+        output_shape = (channels, out_h, out_w)
+    shapes[node] = output_shape
+    dtypes[node] = dtype_info.torch_dtype
+    strides[node] = _contiguous_strides(output_shape)
+    return _OpNode(
+        node=node,
+        spec=op_spec,
+        inputs=[input_arg],
+        output_shape=output_shape,
+        inplace_input=None,
+        params={
+            "output_size": output_pair,
+            "kernel_size": kernel_pair,
+            "dilation": dilation_pair,
+            "padding": padding_pair,
+            "stride": stride_pair,
+            "out_blocks_h": out_blocks_h,
+            "out_blocks_w": out_blocks_w,
+        },
+    )
+
+
 def _handle_to_copy_node(
     node: torch.fx.Node,
     op_spec: _OpSpec,
@@ -6192,6 +6480,13 @@ def _analyze_generic_graph(
             if op_spec.kind == "pool2d":
                 op_nodes.append(
                     _handle_pool2d_node(
+                        node, op_spec, dtype_info, shapes, strides, dtypes
+                    )
+                )
+                continue
+            if op_spec.kind == "col2im":
+                op_nodes.append(
+                    _handle_col2im_node(
                         node, op_spec, dtype_info, shapes, strides, dtypes
                     )
                 )

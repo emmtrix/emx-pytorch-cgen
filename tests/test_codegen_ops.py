@@ -741,6 +741,7 @@ CODEGEN_ATEN_OPS = [
 CODEGEN_EXTRA_ATEN_OPS = [
     torch.ops.aten._log_softmax.default,
     torch.ops.aten.alias.default,
+    torch.ops.aten.col2im.default,
     torch.ops.aten.copy.default,
     torch.ops.aten.div.Tensor_mode,
     torch.ops.aten.div.Scalar_mode,
@@ -1405,6 +1406,51 @@ class TestCodegenAdditionalOps(TestCase):
         inputs = (torch.rand(2, 3, 6, 8, dtype=torch.float32), (3, 4))
         expected = aten_overload(*inputs)
         result = compiled(*inputs)
+        torch.testing.assert_close(result, expected)
+
+    def test_codegen_col2im_matches_eager(self):
+        aten_overload = torch.ops.aten.col2im.default
+        compiled = _compile_codegen_op(aten_overload)
+        output_size = (4, 4)
+        kernel_size = (2, 2)
+        dilation = (1, 1)
+        padding = (0, 0)
+        stride = (1, 1)
+        batched_input = torch.randn(1, 12, 9, dtype=torch.float32)
+        expected = aten_overload(
+            batched_input,
+            output_size,
+            kernel_size,
+            dilation,
+            padding,
+            stride,
+        )
+        result = compiled(
+            batched_input,
+            output_size,
+            kernel_size,
+            dilation,
+            padding,
+            stride,
+        )
+        torch.testing.assert_close(result, expected)
+        unbatched_input = torch.randn(12, 9, dtype=torch.float32)
+        expected = aten_overload(
+            unbatched_input,
+            output_size,
+            kernel_size,
+            dilation,
+            padding,
+            stride,
+        )
+        result = compiled(
+            unbatched_input,
+            output_size,
+            kernel_size,
+            dilation,
+            padding,
+            stride,
+        )
         torch.testing.assert_close(result, expected)
 
     def test_codegen_native_batch_norm_no_training_matches_eager(self):
