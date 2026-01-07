@@ -334,8 +334,6 @@ class CumsumHandler(KindHandler):
             graph.strides[input_node],
             graph.strides[op_node.node],
             op_node.p("dim"),
-            graph.dtypes[input_node],
-            graph.dtypes[op_node.node],
             graph.dtype,
             graph.dtypes[op_node.node],
         )
