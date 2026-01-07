@@ -1085,6 +1085,7 @@ _REGISTRY.register_unary("reciprocal").targets(
     torch.ops.aten.reciprocal_,
 ).build()
 _REGISTRY.register_unary("relu").targets(
+    F.relu,
     torch.relu,
     torch.ops.aten.relu.default,
     torch.ops.aten.relu,
@@ -1481,6 +1482,7 @@ _REGISTRY.register_op("bmm", kind="matmul").targets(
     torch.ops.aten.bmm.default,
 ).build()
 _REGISTRY.register_op("conv2d", kind="conv2d").targets(
+    F.conv2d,
     torch.ops.aten.convolution.default,
     torch.ops.aten.convolution,
     torch.ops.aten.conv2d.default,

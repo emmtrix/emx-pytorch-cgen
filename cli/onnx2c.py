@@ -8,6 +8,11 @@ import torch
 from codegen_backend.export import export_generic_c
 
 
+class _InlineModuleTracer(torch.fx.Tracer):
+    def is_leaf_module(self, m: torch.nn.Module, module_qualified_name: str) -> bool:
+        return False
+
+
 def _require_module(module_name: str, message: str):
     try:
         return importlib.import_module(module_name)
@@ -65,6 +70,12 @@ def _collect_example_inputs(onnx_module, model, default_dim: int) -> List[torch.
     return inputs
 
 
+def _trace_module(torch_module: torch.nn.Module) -> torch.fx.GraphModule:
+    tracer = _InlineModuleTracer()
+    graph = tracer.trace(torch_module)
+    return torch.fx.GraphModule(torch_module, graph)
+
+
 def _parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Convert an ONNX model to C code using the codegen backend."
@@ -106,7 +117,7 @@ def main(argv: Iterable[str] | None = None) -> int:
     example_inputs = _collect_example_inputs(onnx_module, model, args.default_dim)
     torch_module = onnx2torch_module.convert(model)
     torch_module.eval()
-    graph_module = torch.fx.symbolic_trace(torch_module)
+    graph_module = _trace_module(torch_module)
     export_generic_c(graph_module, example_inputs, str(out_path))
     return 0
 

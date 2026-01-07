@@ -7465,6 +7465,7 @@ def _analyze_generic_graph(
                     "log_softmax",
                     "diagonal",
                     "cumsum",
+                    "clone",
                 }:
                     raise RefBackendError(f"Unsupported call_method: {node.target}")
                 op_spec = SUPPORTED_OPS[node.target]
@@ -7860,6 +7861,12 @@ def _analyze_generic_graph(
                         allowed_kwargs = {"rounding_mode"}
                     elif op_spec.name == "copy":
                         allowed_kwargs = {"non_blocking"}
+                    elif op_spec.name == "relu":
+                        allowed_kwargs = {"inplace"}
+                        if node.kwargs.get("inplace"):
+                            raise RefBackendError(
+                                "codegen relu expects inplace to be False"
+                            )
                     if is_out_overload:
                         allowed_kwargs.add("out")
                     if node.kwargs and set(node.kwargs) - allowed_kwargs:

@@ -23,6 +23,13 @@ def _sanitize_weight_name(target: str) -> str:
     return sanitized
 
 
+def _resolve_attr(obj: object, target: str) -> object:
+    current = obj
+    for name in target.split("."):
+        current = getattr(current, name)
+    return current
+
+
 def _lift_get_attr_to_placeholders(
     gm: torch.fx.GraphModule, example_inputs: Sequence[object]
 ) -> Tuple[
@@ -49,7 +56,7 @@ def _lift_get_attr_to_placeholders(
             updated_inputs.append(example)
             continue
         if node.op == "get_attr":
-            weight = getattr(gm, node.target)
+            weight = _resolve_attr(gm, node.target)
             if not isinstance(weight, torch.Tensor):
                 raise RefBackendError(
                     "codegen backend export expects get_attr tensors only"
