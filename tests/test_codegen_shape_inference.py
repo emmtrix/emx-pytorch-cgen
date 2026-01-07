@@ -170,6 +170,14 @@ def test_infer_output_shape_by_handler() -> None:
             (2, 6, 8),
         ),
         (
+            "conv1d",
+            [(2, 4, 9), (6, 4, 3)],
+            {"stride": 2, "padding": "same", "dilation": 1, "groups": 1},
+            None,
+            False,
+            (2, 6, 5),
+        ),
+        (
             "conv2d",
             [(1, 3, 8, 8), (6, 3, 3, 3)],
             {
@@ -183,6 +191,21 @@ def test_infer_output_shape_by_handler() -> None:
             None,
             False,
             (1, 6, 6, 6),
+        ),
+        (
+            "conv2d",
+            [(1, 3, 7, 7), (6, 3, 3, 3)],
+            {
+                "stride": (2, 2),
+                "padding": "same",
+                "dilation": (1, 1),
+                "groups": 1,
+                "transposed": False,
+                "output_padding": (0, 0),
+            },
+            None,
+            False,
+            (1, 6, 4, 4),
         ),
         ("addmm", [(), (2, 3), (3, 4)], {}, None, False, (2, 4)),
         ("addbmm", [(), (2, 2, 3), (2, 3, 4)], {}, None, False, (2, 4)),

@@ -37,7 +37,6 @@ from codegen_backend.param_normalize import (
     normalize_padding,
 )
 from codegen_backend.registry import TARGET_REGISTRY
-from codegen_backend import shape_inference
 from codegen_backend.specs import _OpSpec
 _BITWISE_OPS = {
     "bitwise_and",
@@ -2366,9 +2365,15 @@ def _write_conv2d_kernel(
         "conv2d_transpose_kernel.c.j2" if transposed else "conv2d_kernel.c.j2"
     )
     conv2d_template = _get_template_env().get_template(template_name)
-    has_batch, batch, in_channels, in_h, in_w = (
-        shape_inference.unpack_conv2d_input_shape(input_shape)
-    )
+    if len(input_shape) == 4:
+        has_batch = True
+        batch, in_channels, in_h, in_w = input_shape
+    elif len(input_shape) == 3:
+        has_batch = False
+        batch = 1
+        in_channels, in_h, in_w = input_shape
+    else:
+        raise RefBackendError("codegen conv2d requires 3D or 4D input tensors")
     if transposed:
         weight_in_channels, weight_out_channels, k_h, k_w = weight_shape
         out_channels = weight_out_channels * groups
