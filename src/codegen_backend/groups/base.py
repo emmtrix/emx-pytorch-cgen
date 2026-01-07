@@ -1,18 +1,18 @@
 from __future__ import annotations
 
-from typing import Dict, Mapping, Protocol
+from typing import Mapping, Protocol, Sequence
 
-from codegen_backend.kinds import HandlerContext, OpKindHandler
+from codegen_backend.kinds import HandlerContext, OpKindHandlerFactory
 from codegen_backend.registry import _TargetInfo
-from codegen_backend.specs import OpKind, _OpSpec
+from codegen_backend.specs import _OpSpec
 
 
 class OperatorGroup(Protocol):
     name: str
 
-    def kind_handlers(
-        self, context: HandlerContext
-    ) -> Dict[OpKind, OpKindHandler]: ...
+    def kind_handler_factories(
+        self,
+    ) -> Sequence[OpKindHandlerFactory]: ...
 
     def supported_ops(self) -> Mapping[object, _OpSpec]: ...
 

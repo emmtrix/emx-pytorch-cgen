@@ -1,23 +1,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Mapping
+from typing import List, Mapping
 
 from codegen_backend.groups.builtin.embedding import handlers
-from codegen_backend.kinds import HandlerContext, OpKindHandler
+from codegen_backend.kinds import OpKindHandlerFactory
 from codegen_backend.ops_registry_embedding import build_supported_ops
 from codegen_backend.registry import _TargetInfo, build_target_registry
-from codegen_backend.specs import OpKind, _OpSpec
+from codegen_backend.specs import _OpSpec
 
 
 @dataclass(frozen=True)
 class EmbeddingGroup:
     name: str = "embedding"
 
-    def kind_handlers(
-        self, context: HandlerContext
-    ) -> Dict[OpKind, OpKindHandler]:
-        return handlers.build_handlers(context)
+    def kind_handler_factories(self) -> List[OpKindHandlerFactory]:
+        return [handlers.EmbeddingKindHandlerFactory()]
 
     def supported_ops(self) -> Mapping[str, _OpSpec]:
         return build_supported_ops()

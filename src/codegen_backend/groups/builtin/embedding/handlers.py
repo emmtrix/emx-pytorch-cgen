@@ -17,6 +17,7 @@ from codegen_backend.kinds import (
     EmbeddingHandler,
     HandlerContext,
     OpKindHandler,
+    OpKindHandlerFactory,
     OpNodeBuildResult,
 )
 from codegen_backend.specs import OpKind, _OpSpec
@@ -201,6 +202,13 @@ def build_handlers(context: HandlerContext) -> Dict[OpKind, OpKindHandler]:
     }
 
 
+class EmbeddingKindHandlerFactory:
+    def build_handlers(
+        self, context: HandlerContext
+    ) -> Dict[OpKind, OpKindHandler]:
+        return build_handlers(context)
+
+
 def build_kind_handler_registrations() -> Dict[OpKind, KindHandlerRegistration]:
     return {
         OpKind.EMBEDDING: KindHandlerRegistration(
@@ -212,4 +220,8 @@ def build_kind_handler_registrations() -> Dict[OpKind, KindHandlerRegistration]:
     }
 
 
-__all__ = ["build_handlers", "build_kind_handler_registrations"]
+__all__ = [
+    "EmbeddingKindHandlerFactory",
+    "build_handlers",
+    "build_kind_handler_registrations",
+]

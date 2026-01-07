@@ -18,6 +18,7 @@ from codegen_backend.kinds import (
     Conv2dHandler,
     HandlerContext,
     OpKindHandler,
+    OpKindHandlerFactory,
     OpNodeBuildResult,
 )
 from codegen_backend.param_normalize import normalize_int_or_pair, normalize_int_or_tuple, normalize_padding
@@ -313,6 +314,13 @@ def build_handlers(context: HandlerContext) -> Dict[OpKind, OpKindHandler]:
     }
 
 
+class ConvKindHandlerFactory:
+    def build_handlers(
+        self, context: HandlerContext
+    ) -> Dict[OpKind, OpKindHandler]:
+        return build_handlers(context)
+
+
 def build_kind_handler_registrations() -> Dict[OpKind, KindHandlerRegistration]:
     return {
         OpKind.CONV1D: KindHandlerRegistration(
@@ -324,4 +332,8 @@ def build_kind_handler_registrations() -> Dict[OpKind, KindHandlerRegistration]:
     }
 
 
-__all__ = ["build_handlers", "build_kind_handler_registrations"]
+__all__ = [
+    "ConvKindHandlerFactory",
+    "build_handlers",
+    "build_kind_handler_registrations",
+]

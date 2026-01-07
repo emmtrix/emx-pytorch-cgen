@@ -17,6 +17,7 @@ from codegen_backend.kinds import (
     ArgReductionHandler,
     HandlerContext,
     OpKindHandler,
+    OpKindHandlerFactory,
     OpNodeBuildResult,
     ReductionHandler,
     SoftmaxHandler,
@@ -243,6 +244,13 @@ def build_handlers(context: HandlerContext) -> Dict[OpKind, OpKindHandler]:
     }
 
 
+class ReductionsKindHandlerFactory:
+    def build_handlers(
+        self, context: HandlerContext
+    ) -> Dict[OpKind, OpKindHandler]:
+        return build_handlers(context)
+
+
 def build_kind_handler_registrations() -> Dict[OpKind, KindHandlerRegistration]:
     return {
         OpKind.REDUCTION: KindHandlerRegistration(
@@ -257,4 +265,8 @@ def build_kind_handler_registrations() -> Dict[OpKind, KindHandlerRegistration]:
     }
 
 
-__all__ = ["build_handlers", "build_kind_handler_registrations"]
+__all__ = [
+    "ReductionsKindHandlerFactory",
+    "build_handlers",
+    "build_kind_handler_registrations",
+]
