@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List
+from importlib import metadata
+from typing import Dict, Iterable, List, Sequence
 
 from codegen_backend.groups.analysis import GroupAnalyzer
 from codegen_backend.groups.base import OperatorGroupDefinition
@@ -48,29 +49,69 @@ class GroupRegistry:
 
 
 _GROUP_REGISTRY: GroupRegistry | None = None
+_REGISTERED_GROUPS: Dict[str, OperatorGroupDefinition] = {}
+_DEFAULT_GROUPS_LOADED = False
+_ENTRY_POINTS_LOADED = False
+
+
+def register_group(group: OperatorGroupDefinition) -> None:
+    global _GROUP_REGISTRY
+    _REGISTERED_GROUPS[group.name] = group
+    _GROUP_REGISTRY = None
+
+
+def _load_builtin_groups() -> None:
+    global _DEFAULT_GROUPS_LOADED
+    if _DEFAULT_GROUPS_LOADED:
+        return
+    _DEFAULT_GROUPS_LOADED = True
+    from codegen_backend.groups.builtin.registration import register_builtin_groups
+
+    register_builtin_groups()
+
+
+def _iter_entry_points() -> Iterable[metadata.EntryPoint]:
+    entry_points = metadata.entry_points()
+    if hasattr(entry_points, "select"):
+        return entry_points.select(group="codegen_backend.groups")
+    return entry_points.get("codegen_backend.groups", [])
+
+
+def _register_from_entry_point(entry_point: metadata.EntryPoint) -> None:
+    loaded = entry_point.load()
+    result = loaded() if callable(loaded) else loaded
+    if result is None:
+        return
+    if isinstance(result, OperatorGroupDefinition):
+        register_group(result)
+        return
+    if isinstance(result, Sequence):
+        for item in result:
+            if not isinstance(item, OperatorGroupDefinition):
+                raise TypeError(
+                    "entry point returned a sequence containing non-group items"
+                )
+            register_group(item)
+        return
+    raise TypeError("entry point did not return a group definition")
+
+
+def _load_entry_point_groups() -> None:
+    global _ENTRY_POINTS_LOADED
+    if _ENTRY_POINTS_LOADED:
+        return
+    _ENTRY_POINTS_LOADED = True
+    for entry_point in _iter_entry_points():
+        _register_from_entry_point(entry_point)
 
 
 def get_group_registry() -> GroupRegistry:
     global _GROUP_REGISTRY
     if _GROUP_REGISTRY is None:
-        from codegen_backend.groups.builtin.conv.group import ConvGroup
-        from codegen_backend.groups.builtin.elementwise.group import ElementwiseGroup
-        from codegen_backend.groups.builtin.embedding.group import EmbeddingGroup
-        from codegen_backend.groups.builtin.pooling.group import PoolingGroup
-        from codegen_backend.groups.builtin.reductions.group import ReductionsGroup
-        from codegen_backend.groups.builtin.tensor.group import TensorGroup
-
-        _GROUP_REGISTRY = GroupRegistry(
-            groups=[
-                ElementwiseGroup(),
-                ReductionsGroup(),
-                PoolingGroup(),
-                ConvGroup(),
-                EmbeddingGroup(),
-                TensorGroup(),
-            ]
-        )
+        _load_builtin_groups()
+        _load_entry_point_groups()
+        _GROUP_REGISTRY = GroupRegistry(groups=list(_REGISTERED_GROUPS.values()))
     return _GROUP_REGISTRY
 
 
-__all__ = ["GroupRegistry", "get_group_registry"]
+__all__ = ["GroupRegistry", "get_group_registry", "register_group"]
