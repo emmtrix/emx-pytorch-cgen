@@ -18,7 +18,8 @@ from codegen_backend.graph import _OpNode
 from codegen_backend.indexing import _contiguous_strides
 from codegen_backend.kinds import (
     ElementwiseHandler,
-    HandlerContext,
+    ElementwiseContext,
+    HandlerContextProvider,
     OpKindHandler,
     OpKindHandlerFactory,
     OpNodeBuildResult,
@@ -361,7 +362,7 @@ class _BackendElementwiseHandler(ElementwiseHandler):
         return OpNodeBuildResult(op_node)
 
 
-def build_handlers(context: HandlerContext) -> Dict[OpKind, OpKindHandler]:
+def build_handlers(context: ElementwiseContext) -> Dict[OpKind, OpKindHandler]:
     elementwise_emitter = ElementwiseEmitter()
     return {
         OpKind.BINARY: _BackendElementwiseHandler(
@@ -381,9 +382,9 @@ def build_handlers(context: HandlerContext) -> Dict[OpKind, OpKindHandler]:
 
 class ElementwiseKindHandlerFactory:
     def build_handlers(
-        self, context: HandlerContext
+        self, context_provider: HandlerContextProvider
     ) -> Dict[OpKind, OpKindHandler]:
-        return build_handlers(context)
+        return build_handlers(context_provider.elementwise)
 
 
 def build_kind_handler_registrations() -> Dict[OpKind, KindHandlerRegistration]:

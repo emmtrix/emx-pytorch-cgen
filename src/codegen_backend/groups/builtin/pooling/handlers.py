@@ -16,13 +16,14 @@ from codegen_backend.errors import CodegenBackendError
 from codegen_backend.graph import _OpNode
 from codegen_backend.indexing import _contiguous_strides
 from codegen_backend.kinds import (
-    HandlerContext,
+    HandlerContextProvider,
     OpKindHandler,
     OpKindHandlerFactory,
     OpNodeBuildResult,
     Pool1dHandler,
     Pool2dBackwardHandler,
     Pool2dHandler,
+    PoolingContext,
     Pool3dHandler,
 )
 from codegen_backend.param_normalize import normalize_int_or_pair, normalize_int_or_tuple
@@ -696,7 +697,7 @@ class _BackendPool2dBackwardHandler(Pool2dBackwardHandler):
         return _is_contiguous(shape, stride)
 
 
-def build_handlers(context: HandlerContext) -> Dict[OpKind, OpKindHandler]:
+def build_handlers(context: PoolingContext) -> Dict[OpKind, OpKindHandler]:
     return {
         OpKind.POOL1D: _BackendPool1dHandler(context, Pool1dEmitter()),
         OpKind.POOL2D: _BackendPool2dHandler(context, Pool2dEmitter()),
@@ -709,9 +710,9 @@ def build_handlers(context: HandlerContext) -> Dict[OpKind, OpKindHandler]:
 
 class PoolingKindHandlerFactory:
     def build_handlers(
-        self, context: HandlerContext
+        self, context_provider: HandlerContextProvider
     ) -> Dict[OpKind, OpKindHandler]:
-        return build_handlers(context)
+        return build_handlers(context_provider.pooling)
 
 
 def build_kind_handler_registrations() -> Dict[OpKind, KindHandlerRegistration]:

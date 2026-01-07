@@ -16,7 +16,8 @@ from codegen_backend.indexing import _contiguous_strides
 from codegen_backend.kinds import (
     Conv1dHandler,
     Conv2dHandler,
-    HandlerContext,
+    ConvContext,
+    HandlerContextProvider,
     OpKindHandler,
     OpKindHandlerFactory,
     OpNodeBuildResult,
@@ -307,7 +308,7 @@ class _BackendConv2dHandler(Conv2dHandler):
         return OpNodeBuildResult(op_node)
 
 
-def build_handlers(context: HandlerContext) -> Dict[OpKind, OpKindHandler]:
+def build_handlers(context: ConvContext) -> Dict[OpKind, OpKindHandler]:
     return {
         OpKind.CONV1D: _BackendConv1dHandler(context, Conv1dEmitter()),
         OpKind.CONV2D: _BackendConv2dHandler(context, Conv2dEmitter()),
@@ -316,9 +317,9 @@ def build_handlers(context: HandlerContext) -> Dict[OpKind, OpKindHandler]:
 
 class ConvKindHandlerFactory:
     def build_handlers(
-        self, context: HandlerContext
+        self, context_provider: HandlerContextProvider
     ) -> Dict[OpKind, OpKindHandler]:
-        return build_handlers(context)
+        return build_handlers(context_provider.conv)
 
 
 def build_kind_handler_registrations() -> Dict[OpKind, KindHandlerRegistration]:

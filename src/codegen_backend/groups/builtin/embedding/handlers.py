@@ -15,7 +15,8 @@ from codegen_backend.indexing import _contiguous_strides
 from codegen_backend.kinds import (
     EmbeddingBagHandler,
     EmbeddingHandler,
-    HandlerContext,
+    EmbeddingContext,
+    HandlerContextProvider,
     OpKindHandler,
     OpKindHandlerFactory,
     OpNodeBuildResult,
@@ -193,7 +194,7 @@ class _BackendEmbeddingBagHandler(EmbeddingBagHandler):
         return OpNodeBuildResult(op_node)
 
 
-def build_handlers(context: HandlerContext) -> Dict[OpKind, OpKindHandler]:
+def build_handlers(context: EmbeddingContext) -> Dict[OpKind, OpKindHandler]:
     return {
         OpKind.EMBEDDING: _BackendEmbeddingHandler(context, EmbeddingEmitter()),
         OpKind.EMBEDDING_BAG: _BackendEmbeddingBagHandler(
@@ -204,9 +205,9 @@ def build_handlers(context: HandlerContext) -> Dict[OpKind, OpKindHandler]:
 
 class EmbeddingKindHandlerFactory:
     def build_handlers(
-        self, context: HandlerContext
+        self, context_provider: HandlerContextProvider
     ) -> Dict[OpKind, OpKindHandler]:
-        return build_handlers(context)
+        return build_handlers(context_provider.embedding)
 
 
 def build_kind_handler_registrations() -> Dict[OpKind, KindHandlerRegistration]:
