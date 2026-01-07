@@ -2,9 +2,20 @@
 #include <stdbool.h>
 #include "ops_scalar_f32.h"
 
-static const float weight_Conv_weight[9] = {
-    0x0.0p+0f, 0x0.0p+0f, 0x0.0p+0f, 0x0.0p+0f, 0x1.000000p+0f, 0x0.0p+0f, 0x0.0p+0f, 0x0.0p+0f,
-    0x0.0p+0f
+static const float weight_Conv_weight[1][1][3][3] = {
+    {
+        {
+            {
+                0x0.0p+0f, 0x0.0p+0f, 0x0.0p+0f
+            },
+            {
+                0x0.0p+0f, 0x1.000000p+0f, 0x0.0p+0f
+            },
+            {
+                0x0.0p+0f, 0x0.0p+0f, 0x0.0p+0f
+            }
+        }
+    }
 };
 
 static const float weight_Conv_bias[1] = {
