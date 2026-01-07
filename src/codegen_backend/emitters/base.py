@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC
-from typing import Dict, List, Sequence, Tuple
+from typing import List, Protocol, Sequence, Tuple
 
 import torch
 
@@ -12,6 +12,7 @@ from codegen_backend.indexing import (
     format_input_access,
     format_output_access,
 )
+from codegen_backend.kinds import KernelEmitRequest
 from codegen_backend.specs import OpKind, _OpSpec
 
 
@@ -155,13 +156,12 @@ def emit_footer(output_shape: Sequence[int], indent: str) -> List[str]:
     return lines
 
 
+class KindEmitter(Protocol):
+    def emit(self, req: KernelEmitRequest) -> List[str]: ...
+
 class KindEmitterBase(ABC):
     emit_signature = staticmethod(emit_signature)
     emit_loops = staticmethod(emit_loops)
     emit_footer = staticmethod(emit_footer)
     emit_input_access = staticmethod(emit_input_access)
     emit_output_access = staticmethod(emit_output_access)
-
-
-def build_kind_emitters() -> Dict[OpKind, KindEmitterBase]:
-    return {}
