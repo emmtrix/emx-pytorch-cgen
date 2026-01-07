@@ -52,7 +52,7 @@ ONNX_CASES = [
         ONNX_DIR / "test_onnx09_mnist_simplified.onnx",
         id="onnx09_mnist_simplified",
         marks=pytest.mark.skip(
-            reason="reshape/linear not yet supported in codegen backend"
+            reason="linear not yet supported in codegen backend"
         ),
     ),
     pytest.param(
