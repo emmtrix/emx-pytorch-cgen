@@ -26,32 +26,16 @@ from codegen_backend.dtypes import (
 )
 from codegen_backend.graph import _GenericGraph, _GenericLibrary, _OpNode
 from codegen_backend.emitters.base import _format_array_suffix, _is_contiguous
-from codegen_backend.emitters.arange import ArangeEmitter
-from codegen_backend.emitters.addr import AddrEmitter
-from codegen_backend.emitters.concat import ConcatEmitter
-from codegen_backend.emitters.conv1d import Conv1dEmitter
-from codegen_backend.emitters.conv2d import Conv2dEmitter
-from codegen_backend.emitters.embedding import EmbeddingEmitter
-from codegen_backend.emitters.embedding_bag import EmbeddingBagEmitter
-from codegen_backend.emitters.empty_strided import EmptyStridedEmitter
 from codegen_backend.emitters.elementwise import (
     _FLOAT_ONLY_UNARY_OPS,
     _PARAMETRIC_UNARY_OPS,
 )
-from codegen_backend.emitters.elementwise import ElementwiseEmitter
-from codegen_backend.emitters.matmul import MatmulEmitter
-from codegen_backend.emitters.pool1d import Pool1dEmitter
-from codegen_backend.emitters.pool2d import Pool2dEmitter
-from codegen_backend.emitters.pool2d_backward import Pool2dBackwardEmitter
-from codegen_backend.emitters.pool3d import Pool3dEmitter
-from codegen_backend.emitters.reduction import ReductionEmitter
-from codegen_backend.emitters.argreduction import ArgReductionEmitter
-from codegen_backend.emitters.softmax import SoftmaxEmitter
 from codegen_backend.indexing import (
     _contiguous_strides,
     _emit_strided_access,
     _format_strided_access,
 )
+from codegen_backend.groups.registry import get_group_registry
 from codegen_backend.kinds import (
     ArangeHandler,
     ConcatHandler,
@@ -72,16 +56,13 @@ from codegen_backend.kinds import (
     Pool2dHandler,
     Pool3dHandler,
     SoftmaxHandler,
-    build_kind_handlers,
 )
-from codegen_backend.ops_registry import SUPPORTED_OPS
 from codegen_backend.param_normalize import (
     normalize_bool,
     normalize_int_or_pair,
     normalize_int_or_tuple,
     normalize_padding,
 )
-from codegen_backend.registry import TARGET_REGISTRY
 from codegen_backend.specs import OpKind, _OpSpec
 from codegen_backend.templates import get_template_env
 _BITWISE_OPS = {
@@ -104,6 +85,41 @@ def _is_out_overload(target: object) -> bool:
 
 
 _C_SRC_DIR = Path(__file__).resolve().parents[2] / "csrc"
+
+_GROUP_REGISTRY = None
+_SUPPORTED_OPS: Dict[str, _OpSpec] | None = None
+_TARGET_REGISTRY: Dict[object, "_TargetInfo"] | None = None
+_KIND_HANDLERS: Dict[OpKind, "OpKindHandler"] | None = None
+
+
+def _get_group_registry():
+    global _GROUP_REGISTRY
+    if _GROUP_REGISTRY is None:
+        _GROUP_REGISTRY = get_group_registry()
+    return _GROUP_REGISTRY
+
+
+def _get_supported_ops() -> Dict[str, _OpSpec]:
+    global _SUPPORTED_OPS
+    if _SUPPORTED_OPS is None:
+        _SUPPORTED_OPS = _get_group_registry().build_supported_ops()
+    return _SUPPORTED_OPS
+
+
+def _get_target_registry() -> Dict[object, "_TargetInfo"]:
+    global _TARGET_REGISTRY
+    if _TARGET_REGISTRY is None:
+        _TARGET_REGISTRY = _get_group_registry().build_target_registry()
+    return _TARGET_REGISTRY
+
+
+def _get_kind_handlers() -> Dict[OpKind, "OpKindHandler"]:
+    global _KIND_HANDLERS
+    if _KIND_HANDLERS is None:
+        _KIND_HANDLERS = _get_group_registry().build_kind_handlers(
+            _HANDLER_CONTEXT
+        )
+    return _KIND_HANDLERS
 
 
 def _channels_last_strides(shape: Sequence[int]) -> Tuple[int, ...]:
@@ -225,7 +241,7 @@ def _write_generic_source(graph: _GenericGraph) -> str:
     ]
     kernels: List[str] = []
     for index, op_node in enumerate(op_nodes, start=1):
-        handler = _KIND_HANDLERS.get(op_node.spec.kind)
+        handler = _get_kind_handlers().get(op_node.spec.kind)
         if handler is None:
             raise CodegenBackendError(
                 "codegen backend does not support kind "
@@ -373,10 +389,10 @@ def _infer_empty_strided_dtype(
     for node in gm.graph.nodes:
         if node.op != "call_function":
             continue
-        target_info = TARGET_REGISTRY.get(node.target)
+        target_info = _get_target_registry().get(node.target)
         if target_info is None:
             continue
-        handler = _KIND_HANDLERS.get(target_info.op_spec.kind)
+        handler = _get_kind_handlers().get(target_info.op_spec.kind)
         if handler is None:
             continue
         node_dtype = handler.infer_graph_dtype(node, target_info.op_spec)
@@ -415,7 +431,7 @@ def _unwrap_output_node(output_node: torch.fx.Node) -> Tuple[torch.fx.Node, obje
 def _infer_output_shape(
     op_node: _OpNode, input_shapes: Sequence[Tuple[int, ...]]
 ) -> Tuple[int, ...]:
-    handler = _KIND_HANDLERS.get(op_node.spec.kind)
+    handler = _get_kind_handlers().get(op_node.spec.kind)
     if handler is None:
         raise CodegenBackendError(
             f"codegen backend does not support kind '{op_node.spec.kind.value}'"
@@ -3277,15 +3293,15 @@ def _analyze_generic_graph(
                     "clone",
                 }:
                     raise CodegenBackendError(f"Unsupported call_method: {node.target}")
-                op_spec = SUPPORTED_OPS[node.target]
+                op_spec = _get_supported_ops()[node.target]
                 inplace_input = None
             else:
-                target_info = TARGET_REGISTRY.get(node.target)
+                target_info = _get_target_registry().get(node.target)
                 if target_info is None:
                     raise CodegenBackendError(f"Unsupported call_function: {node.target}")
                 op_spec = target_info.op_spec
                 inplace_input = target_info.inplace_arg_index
-            handler = _KIND_HANDLERS.get(op_spec.kind)
+            handler = _get_kind_handlers().get(op_spec.kind)
             if handler is None:
                 raise CodegenBackendError(
                     "codegen backend does not support kind "
@@ -5776,56 +5792,6 @@ class _KindHandlerContext(HandlerContext):
 
 
 _HANDLER_CONTEXT = _KindHandlerContext()
-_KIND_HANDLERS = build_kind_handlers(_HANDLER_CONTEXT)
-_ELEMENTWISE_EMITTER = ElementwiseEmitter()
-_KIND_HANDLERS.update(
-    {
-        OpKind.BINARY: _BackendElementwiseHandler(
-            _HANDLER_CONTEXT, _ELEMENTWISE_EMITTER, "binary"
-        ),
-        OpKind.UNARY: _BackendElementwiseHandler(
-            _HANDLER_CONTEXT, _ELEMENTWISE_EMITTER, "unary"
-        ),
-        OpKind.WHERE: _BackendElementwiseHandler(
-            _HANDLER_CONTEXT, _ELEMENTWISE_EMITTER, "where"
-        ),
-        OpKind.FILL: _BackendElementwiseHandler(
-            _HANDLER_CONTEXT, _ELEMENTWISE_EMITTER, "fill"
-        ),
-        OpKind.ARANGE: _BackendArangeHandler(_HANDLER_CONTEXT, ArangeEmitter()),
-        OpKind.CONCAT: _BackendConcatHandler(_HANDLER_CONTEXT, ConcatEmitter()),
-        OpKind.EMPTY_STRIDED: _BackendEmptyStridedHandler(
-            _HANDLER_CONTEXT, EmptyStridedEmitter()
-        ),
-        OpKind.REDUCTION: _BackendReductionHandler(
-            _HANDLER_CONTEXT, ReductionEmitter()
-        ),
-        OpKind.ARG_REDUCTION: _BackendArgReductionHandler(
-            _HANDLER_CONTEXT, ArgReductionEmitter()
-        ),
-        OpKind.POOL1D: _BackendPool1dHandler(_HANDLER_CONTEXT, Pool1dEmitter()),
-        OpKind.POOL2D: _BackendPool2dHandler(_HANDLER_CONTEXT, Pool2dEmitter()),
-        OpKind.POOL3D: _BackendPool3dHandler(_HANDLER_CONTEXT, Pool3dEmitter()),
-        OpKind.POOL2D_BACKWARD: _BackendPool2dBackwardHandler(
-            _HANDLER_CONTEXT, Pool2dBackwardEmitter()
-        ),
-        OpKind.SOFTMAX: _BackendSoftmaxHandler(
-            _HANDLER_CONTEXT, SoftmaxEmitter()
-        ),
-        OpKind.EMBEDDING: _BackendEmbeddingHandler(
-            _HANDLER_CONTEXT, EmbeddingEmitter()
-        ),
-        OpKind.EMBEDDING_BAG: _BackendEmbeddingBagHandler(
-            _HANDLER_CONTEXT, EmbeddingBagEmitter()
-        ),
-        OpKind.CONV1D: _BackendConv1dHandler(_HANDLER_CONTEXT, Conv1dEmitter()),
-        OpKind.CONV2D: _BackendConv2dHandler(_HANDLER_CONTEXT, Conv2dEmitter()),
-        OpKind.MATMUL: _BackendMatmulHandler(
-            _HANDLER_CONTEXT, MatmulEmitter()
-        ),
-        OpKind.ADDR: _BackendAddrHandler(_HANDLER_CONTEXT, AddrEmitter()),
-    }
-)
 
 
 
