@@ -26,13 +26,21 @@ from codegen_backend.dtypes import (
     _INTEGER_CODEGEN_DTYPES,
 )
 from codegen_backend.graph import _GenericGraph, _GenericLibrary, _OpNode
+from codegen_backend.emitters.base import (
+    _close_loops,
+    _format_array_suffix,
+    _is_contiguous,
+    emit_footer,
+    emit_input_access,
+    emit_loops,
+    emit_output_access,
+    emit_signature,
+)
 from codegen_backend.indexing import (
     _contiguous_strides,
     _emit_strided_access,
     _format_output_access,
     _format_strided_access,
-    format_input_access,
-    format_output_access,
 )
 from codegen_backend.kinds import (
     HandlerContext,
@@ -87,10 +95,6 @@ def _is_out_overload(target: object) -> bool:
 _C_SRC_DIR = Path(__file__).resolve().parents[2] / "csrc"
 
 
-def _format_array_suffix(shape: Sequence[int]) -> str:
-    return "".join(f"[{dim}]" for dim in shape) or "[1]"
-
-
 def _channels_last_strides(shape: Sequence[int]) -> Tuple[int, ...]:
     if len(shape) != 4:
         raise RefBackendError("required rank 4 tensor to use channels_last format")
@@ -126,14 +130,6 @@ def _channels_last_3d_strides(shape: Sequence[int]) -> Tuple[int, ...]:
         height * width * channels,
         width * channels,
         channels,
-    )
-
-
-def _is_contiguous(shape: Sequence[int], strides: Sequence[int]) -> bool:
-    expected = _contiguous_strides(shape)
-    return all(
-        size == 1 or stride == expected_stride
-        for size, stride, expected_stride in zip(shape, strides, expected)
     )
 
 
@@ -188,128 +184,6 @@ def _normalize_as_strided_sequence(
         raise RefBackendError(
             f"codegen {op_name} expects {arg_name} entries to be int-like"
         ) from exc
-
-
-def emit_signature(
-    node_index: int,
-    op_spec: _OpSpec,
-    output_shape: Sequence[int],
-    input_shapes: Sequence[Sequence[int]],
-    input_dtypes: Sequence[torch.dtype],
-    dtype: _CodegenDType,
-    params: Dict[str, object] | None = None,
-) -> str:
-    out_suffix = _format_array_suffix(output_shape)
-    if op_spec.kind == OpKind.BINARY:
-        if len(input_shapes) == 1:
-            a_shape = input_shapes[0]
-            a_suffix = _format_array_suffix(a_shape)
-            a_c_type = _input_c_type(input_dtypes[0], dtype)
-            return (
-                f"void node{node_index}_{op_spec.name}_{dtype.suffix}("
-                f"const {a_c_type} a{a_suffix}, "
-                f"{dtype.c_type} out{out_suffix}) {{"
-            )
-        a_shape, b_shape = input_shapes
-        a_suffix = _format_array_suffix(a_shape)
-        b_suffix = _format_array_suffix(b_shape)
-        a_c_type = _input_c_type(input_dtypes[0], dtype)
-        b_c_type = _input_c_type(input_dtypes[1], dtype)
-        return (
-            f"void node{node_index}_{op_spec.name}_{dtype.suffix}("
-            f"const {a_c_type} a{a_suffix}, "
-            f"const {b_c_type} b{b_suffix}, "
-            f"{dtype.c_type} out{out_suffix}) {{"
-        )
-    if op_spec.kind == OpKind.WHERE:
-        params = params or {}
-        input_index = 0
-        cond_shape = input_shapes[input_index]
-        cond_suffix = _format_array_suffix(cond_shape)
-        cond_c_type = _input_c_type(input_dtypes[input_index], dtype)
-        input_index += 1
-        signature_parts = [
-            f"const {cond_c_type} cond{cond_suffix}",
-        ]
-        if "a_scalar" not in params:
-            a_shape = input_shapes[input_index]
-            a_suffix = _format_array_suffix(a_shape)
-            a_c_type = _input_c_type(input_dtypes[input_index], dtype)
-            signature_parts.append(f"const {a_c_type} a{a_suffix}")
-            input_index += 1
-        if "b_scalar" not in params:
-            b_shape = input_shapes[input_index]
-            b_suffix = _format_array_suffix(b_shape)
-            b_c_type = _input_c_type(input_dtypes[input_index], dtype)
-            signature_parts.append(f"const {b_c_type} b{b_suffix}")
-            input_index += 1
-        signature_parts.append(f"{dtype.c_type} out{out_suffix}")
-        return (
-            f"void node{node_index}_{op_spec.name}_{dtype.suffix}("
-            f"{', '.join(signature_parts)}) {{"
-        )
-    a_suffix = _format_array_suffix(input_shapes[0])
-    a_c_type = _input_c_type(input_dtypes[0], dtype)
-    return (
-        f"void node{node_index}_{op_spec.name}_{dtype.suffix}("
-        f"const {a_c_type} a{a_suffix}, "
-        f"{dtype.c_type} out{out_suffix}) {{"
-    )
-
-
-def emit_loops(output_shape: Sequence[int]) -> Tuple[List[str], str]:
-    lines: List[str] = []
-    indent = "    "
-    if output_shape:
-        for dim, size in enumerate(output_shape):
-            lines.append(
-                f"{indent}for (int64_t i{dim} = 0; i{dim} < {size}; ++i{dim}) {{"
-            )
-            indent += "    "
-    return lines, indent
-
-
-def _close_loops(loop_count: int, indent: str) -> Tuple[List[str], str]:
-    lines: List[str] = []
-    for _ in range(loop_count):
-        indent = indent[:-4]
-        lines.append(f"{indent}}}")
-    return lines, indent
-
-
-def emit_output_access(
-    output_shape: Sequence[int],
-    output_strides: Sequence[int],
-    *,
-    c_type: str,
-) -> str:
-    return format_output_access(
-        "out",
-        output_shape,
-        output_strides,
-        c_type=c_type,
-        output_is_contiguous=_is_contiguous(output_shape, output_strides),
-    )
-
-
-def emit_input_access(
-    name: str,
-    input_shape: Sequence[int],
-    input_strides: Sequence[int],
-    output_shape: Sequence[int],
-    *,
-    broadcast_contiguous: bool,
-    c_type: str,
-) -> str:
-    return format_input_access(
-        name,
-        input_shape,
-        input_strides,
-        output_shape,
-        broadcast_contiguous=broadcast_contiguous,
-        c_type=c_type,
-        input_is_contiguous=_is_contiguous(input_shape, input_strides),
-    )
 
 
 def _emit_flip_input_access(
@@ -371,12 +245,6 @@ def _format_diagonal_access(
         terms.append(f"{index_expr} * {stride}")
     index_expr = " + ".join(terms) if terms else "0"
     return f"(({c_type}*){name})[{index_expr}]"
-
-
-def emit_footer(output_shape: Sequence[int], indent: str) -> List[str]:
-    lines, _ = _close_loops(len(output_shape), indent)
-    lines.append("}")
-    return lines
 
 
 def _write_elementwise_kernel(
