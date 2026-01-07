@@ -5,3 +5,4 @@ numpy==2.2.6
 expecttest==0.1.6
 Jinja2==3.1.6
 PyYAML==6.0.2
+onnx2torch==1.5.15
