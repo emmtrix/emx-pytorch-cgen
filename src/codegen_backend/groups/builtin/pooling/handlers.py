@@ -18,6 +18,7 @@ from codegen_backend.indexing import _contiguous_strides
 from codegen_backend.kinds import (
     HandlerContext,
     OpKindHandler,
+    OpKindHandlerFactory,
     OpNodeBuildResult,
     Pool1dHandler,
     Pool2dBackwardHandler,
@@ -706,6 +707,13 @@ def build_handlers(context: HandlerContext) -> Dict[OpKind, OpKindHandler]:
     }
 
 
+class PoolingKindHandlerFactory:
+    def build_handlers(
+        self, context: HandlerContext
+    ) -> Dict[OpKind, OpKindHandler]:
+        return build_handlers(context)
+
+
 def build_kind_handler_registrations() -> Dict[OpKind, KindHandlerRegistration]:
     return {
         OpKind.POOL1D: KindHandlerRegistration(
@@ -723,4 +731,8 @@ def build_kind_handler_registrations() -> Dict[OpKind, KindHandlerRegistration]:
     }
 
 
-__all__ = ["build_handlers", "build_kind_handler_registrations"]
+__all__ = [
+    "PoolingKindHandlerFactory",
+    "build_handlers",
+    "build_kind_handler_registrations",
+]

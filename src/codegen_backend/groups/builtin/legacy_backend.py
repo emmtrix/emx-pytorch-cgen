@@ -1,13 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Mapping
+from typing import List, Mapping
 
-from codegen_backend.emitters.registry import (
-    KindHandlerRegistration,
-    build_kind_handler_registry,
-)
-from codegen_backend.kinds import HandlerContext, OpKindHandler, build_kind_handlers
+from codegen_backend.kinds import OpKindHandlerFactory
 from codegen_backend.ops_registry_conv import build_supported_ops as build_conv_ops
 from codegen_backend.ops_registry_elementwise import (
     build_supported_ops as build_elementwise_ops,
@@ -21,17 +17,15 @@ from codegen_backend.ops_registry_reductions import (
 )
 from codegen_backend.ops_registry_tensor import build_supported_ops as build_tensor_ops
 from codegen_backend.registry import _TargetInfo, build_target_registry
-from codegen_backend.specs import OpKind, _OpSpec
+from codegen_backend.specs import _OpSpec
 
 
 @dataclass(frozen=True)
 class BaseBackendGroup:
     name: str = "base"
 
-    def kind_handlers(
-        self, context: HandlerContext
-    ) -> Dict[OpKind, OpKindHandler]:
-        return build_kind_handlers(context)
+    def kind_handler_factories(self) -> List[OpKindHandlerFactory]:
+        return []
 
     def supported_ops(self) -> Mapping[str, _OpSpec]:
         return {}
@@ -44,14 +38,7 @@ class BaseBackendGroup:
 class LegacyBackendGroup:
     name: str = "legacy"
 
-    def kind_handlers(
-        self, context: HandlerContext
-    ) -> Dict[OpKind, OpKindHandler]:
-        registry = build_kind_handler_registry()
-        registry.update(self.kind_handler_registrations())
-        return build_kind_handlers(context, registry=registry)
-
-    def kind_handler_registrations(self) -> Mapping[OpKind, KindHandlerRegistration]:
+    def kind_handler_factories(self) -> List[OpKindHandlerFactory]:
         from codegen_backend.groups.builtin.conv import handlers as conv_handlers
         from codegen_backend.groups.builtin.elementwise import (
             handlers as elementwise_handlers,
@@ -65,18 +52,14 @@ class LegacyBackendGroup:
         )
         from codegen_backend.groups.builtin.tensor import handlers as tensor_handlers
 
-        registrations: Dict[OpKind, KindHandlerRegistration] = {}
-        registrations.update(
-            elementwise_handlers.build_kind_handler_registrations()
-        )
-        registrations.update(
-            reductions_handlers.build_kind_handler_registrations()
-        )
-        registrations.update(pooling_handlers.build_kind_handler_registrations())
-        registrations.update(conv_handlers.build_kind_handler_registrations())
-        registrations.update(embedding_handlers.build_kind_handler_registrations())
-        registrations.update(tensor_handlers.build_kind_handler_registrations())
-        return registrations
+        return [
+            elementwise_handlers.ElementwiseKindHandlerFactory(),
+            reductions_handlers.ReductionsKindHandlerFactory(),
+            pooling_handlers.PoolingKindHandlerFactory(),
+            conv_handlers.ConvKindHandlerFactory(),
+            embedding_handlers.EmbeddingKindHandlerFactory(),
+            tensor_handlers.TensorKindHandlerFactory(),
+        ]
 
     def supported_ops(self) -> Mapping[str, _OpSpec]:
         supported_ops: Dict[str, _OpSpec] = {}

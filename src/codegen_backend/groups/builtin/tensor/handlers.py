@@ -7,24 +7,55 @@ import torch
 import torch.fx
 
 from codegen_backend.dtypes import _CodegenDType
+from codegen_backend.emitters.addbmm import AddbmmEmitter
+from codegen_backend.emitters.addmm import AddmmEmitter
+from codegen_backend.emitters.addmv import AddmvEmitter
 from codegen_backend.emitters.addr import AddrEmitter
 from codegen_backend.emitters.arange import ArangeEmitter
+from codegen_backend.emitters.batch_norm import BatchNormEmitter
+from codegen_backend.emitters.cdist import CdistEmitter
+from codegen_backend.emitters.col2im import Col2imEmitter
 from codegen_backend.emitters.concat import ConcatEmitter
+from codegen_backend.emitters.cumsum import CumsumEmitter
+from codegen_backend.emitters.diagonal import DiagonalEmitter
 from codegen_backend.emitters.empty_strided import EmptyStridedEmitter
+from codegen_backend.emitters.flip import FlipEmitter
+from codegen_backend.emitters.gather import GatherEmitter
+from codegen_backend.emitters.linear import LinearEmitter
 from codegen_backend.emitters.matmul import MatmulEmitter
+from codegen_backend.emitters.pad import PadEmitter
+from codegen_backend.emitters.pdist import PdistEmitter
 from codegen_backend.emitters.registry import KindHandlerRegistration
+from codegen_backend.emitters.resize import ResizeEmitter
+from codegen_backend.emitters.view import ViewEmitter
 from codegen_backend.errors import CodegenBackendError
 from codegen_backend.graph import _OpNode
 from codegen_backend.indexing import _contiguous_strides
 from codegen_backend.kinds import (
+    AddbmmHandler,
+    AddmmHandler,
+    AddmvHandler,
     AddrHandler,
     ArangeHandler,
+    BatchNormHandler,
+    CdistHandler,
+    Col2imHandler,
     ConcatHandler,
+    CumsumHandler,
+    DiagonalHandler,
     EmptyStridedHandler,
+    FlipHandler,
+    GatherHandler,
     HandlerContext,
+    LinearHandler,
     MatmulHandler,
     OpKindHandler,
+    OpKindHandlerFactory,
     OpNodeBuildResult,
+    PadHandler,
+    PdistHandler,
+    ResizeHandler,
+    ViewHandler,
 )
 from codegen_backend.specs import OpKind, _OpSpec
 from codegen_backend.groups.builtin.tensor.analysis import (
@@ -472,14 +503,192 @@ class _BackendEmptyStridedHandler(EmptyStridedHandler):
 
 def build_handlers(context: HandlerContext) -> Dict[OpKind, OpKindHandler]:
     return {
+        OpKind.ARANGE: _BackendArangeHandler(context, ArangeEmitter()),
+        OpKind.FLIP: FlipHandler(
+            context,
+            FlipEmitter(),
+            builder=_maybe_builder(context, "handle_flip_node", _build_with_dtype),
+        ),
+        OpKind.PAD: PadHandler(
+            context,
+            PadEmitter(),
+            builder=_maybe_builder(context, "handle_pad_node", _build_with_dtype),
+        ),
+        OpKind.VIEW: ViewHandler(
+            context,
+            ViewEmitter(),
+            builder=_maybe_builder(context, "handle_view_node", _build_with_dtype),
+        ),
+        OpKind.RESIZE: ResizeHandler(
+            context,
+            ResizeEmitter(),
+            builder=_maybe_builder(
+                context, "handle_resize_node", _build_with_inplace
+            ),
+        ),
         OpKind.MATMUL: _BackendMatmulHandler(context, MatmulEmitter()),
         OpKind.ADDR: _BackendAddrHandler(context, AddrEmitter()),
-        OpKind.ARANGE: _BackendArangeHandler(context, ArangeEmitter()),
         OpKind.CONCAT: _BackendConcatHandler(context, ConcatEmitter()),
         OpKind.EMPTY_STRIDED: _BackendEmptyStridedHandler(
             context, EmptyStridedEmitter()
         ),
+        OpKind.DIAGONAL: DiagonalHandler(
+            context,
+            DiagonalEmitter(),
+            builder=_maybe_builder(
+                context, "handle_diagonal_node", _build_with_dtype
+            ),
+        ),
+        OpKind.CUMSUM: CumsumHandler(
+            context,
+            CumsumEmitter(),
+            builder=_maybe_builder(
+                context, "handle_cumsum_node", _build_with_dtype
+            ),
+        ),
+        OpKind.GATHER: GatherHandler(
+            context,
+            GatherEmitter(),
+            builder=_maybe_builder(context, "handle_gather_node", _build_with_dtype),
+        ),
+        OpKind.COL2IM: Col2imHandler(
+            context,
+            Col2imEmitter(),
+            builder=_maybe_builder(context, "handle_col2im_node", _build_with_dtype),
+        ),
+        OpKind.BATCH_NORM: BatchNormHandler(
+            context,
+            BatchNormEmitter(),
+            builder=_maybe_builder(
+                context, "handle_batch_norm_node", _build_with_scalar
+            ),
+        ),
+        OpKind.PDIST: PdistHandler(
+            context,
+            PdistEmitter(),
+            builder=_maybe_builder(context, "handle_pdist_node", _build_with_dtype),
+        ),
+        OpKind.CDIST: CdistHandler(
+            context,
+            CdistEmitter(),
+            builder=_maybe_builder(context, "handle_cdist_node", _build_with_dtype),
+        ),
+        OpKind.ADDMM: AddmmHandler(
+            context,
+            AddmmEmitter(),
+            builder=_maybe_builder(
+                context, "handle_addmm_like_node", _build_with_inplace
+            ),
+        ),
+        OpKind.LINEAR: LinearHandler(
+            context,
+            LinearEmitter(),
+            builder=_maybe_builder(
+                context, "handle_linear_node", _build_with_scalar
+            ),
+        ),
+        OpKind.ADDBMM: AddbmmHandler(
+            context,
+            AddbmmEmitter(),
+            builder=_maybe_builder(
+                context, "handle_addmm_like_node", _build_with_inplace
+            ),
+        ),
+        OpKind.ADDMV: AddmvHandler(
+            context,
+            AddmvEmitter(),
+            builder=_maybe_builder(
+                context, "handle_addmm_like_node", _build_with_inplace
+            ),
+        ),
     }
+
+
+def _build_with_dtype(func):
+    def builder(
+        node,
+        op_spec,
+        dtype_info,
+        shapes,
+        strides,
+        dtypes,
+        scalar_values,
+        inplace_input,
+    ):
+        if dtype_info is None:
+            return None
+        op_node = func(node, op_spec, dtype_info, shapes, strides, dtypes)
+        return OpNodeBuildResult(op_node)
+
+    return builder
+
+
+def _build_with_scalar(func):
+    def builder(
+        node,
+        op_spec,
+        dtype_info,
+        shapes,
+        strides,
+        dtypes,
+        scalar_values,
+        inplace_input,
+    ):
+        if dtype_info is None:
+            return None
+        op_node = func(
+            node,
+            op_spec,
+            dtype_info,
+            shapes,
+            strides,
+            dtypes,
+            scalar_values,
+        )
+        return OpNodeBuildResult(op_node)
+
+    return builder
+
+
+def _build_with_inplace(func):
+    def builder(
+        node,
+        op_spec,
+        dtype_info,
+        shapes,
+        strides,
+        dtypes,
+        scalar_values,
+        inplace_input,
+    ):
+        if dtype_info is None:
+            return None
+        op_node = func(
+            node,
+            op_spec,
+            dtype_info,
+            shapes,
+            strides,
+            dtypes,
+            inplace_input,
+        )
+        return OpNodeBuildResult(op_node)
+
+    return builder
+
+
+def _maybe_builder(context, method_name, builder_factory):
+    method = getattr(context, method_name, None)
+    if method is None:
+        return None
+    return builder_factory(method)
+
+
+class TensorKindHandlerFactory:
+    def build_handlers(
+        self, context: HandlerContext
+    ) -> Dict[OpKind, OpKindHandler]:
+        return build_handlers(context)
 
 
 def build_kind_handler_registrations() -> Dict[OpKind, KindHandlerRegistration]:
@@ -500,4 +709,8 @@ def build_kind_handler_registrations() -> Dict[OpKind, KindHandlerRegistration]:
     }
 
 
-__all__ = ["build_handlers", "build_kind_handler_registrations"]
+__all__ = [
+    "TensorKindHandlerFactory",
+    "build_handlers",
+    "build_kind_handler_registrations",
+]

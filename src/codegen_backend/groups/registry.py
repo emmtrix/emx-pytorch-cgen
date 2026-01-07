@@ -21,7 +21,8 @@ class GroupRegistry:
     ) -> Dict[OpKind, OpKindHandler]:
         merged: Dict[OpKind, OpKindHandler] = {}
         for group in self.groups:
-            merged.update(group.kind_handlers(context))
+            for factory in group.kind_handler_factories():
+                merged.update(factory.build_handlers(context))
         return merged
 
     def merged_supported_ops(self) -> Dict[object, _OpSpec]:
