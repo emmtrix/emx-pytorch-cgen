@@ -2,8 +2,13 @@
 #include <stdbool.h>
 #include "ops_scalar_f32.h"
 
-static const float weight_initializers_onnx_initializer_0[4] = {
-    0x1.000000p+0f, 0x0.0p+0f, 0x0.0p+0f, 0x1.000000p+0f
+static const float weight_initializers_onnx_initializer_0[2][2] = {
+    {
+        0x1.000000p+0f, 0x0.0p+0f
+    },
+    {
+        0x0.0p+0f, 0x1.000000p+0f
+    }
 };
 
 void node1_matmul_f32(const float a[1][2], const float b[2][2], float out[1][2]) {

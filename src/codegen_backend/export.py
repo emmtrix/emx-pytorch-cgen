@@ -1,5 +1,6 @@
 import re
 import struct
+from math import prod
 from pathlib import Path
 from typing import Dict, List, Sequence, Tuple
 
@@ -112,6 +113,33 @@ def _format_weight_value(value: object, dtype: torch.dtype) -> str:
     return str(int(value))
 
 
+def _emit_initializer_lines(
+    values: List[str], shape: List[int], indent: str = "    ", per_line: int = 8
+) -> List[str]:
+    if len(shape) == 1:
+        lines: List[str] = []
+        for index in range(0, len(values), per_line):
+            chunk = ", ".join(values[index : index + per_line])
+            lines.append(f"{indent}{chunk},")
+        if lines:
+            lines[-1] = lines[-1].rstrip(",")
+        return lines
+    sub_shape = shape[1:]
+    sub_size = prod(sub_shape)
+    lines = []
+    for index in range(shape[0]):
+        start = index * sub_size
+        end = start + sub_size
+        lines.append(f"{indent}{{")
+        lines.extend(
+            _emit_initializer_lines(values[start:end], sub_shape, indent + "    ", per_line)
+        )
+        lines.append(f"{indent}}},")
+    if lines:
+        lines[-1] = lines[-1].rstrip(",")
+    return lines
+
+
 def _emit_inline_weights(
     weights: Dict[str, torch.Tensor], graph_dtype: _CodegenDType
 ) -> List[str]:
@@ -119,13 +147,11 @@ def _emit_inline_weights(
     for name, tensor in weights.items():
         flat = tensor.detach().cpu().contiguous().view(-1)
         c_type = _dtype_to_c_type(flat.dtype, graph_dtype)
+        shape = list(tensor.shape) if tensor.dim() > 0 else [1]
         values = [_format_weight_value(value, flat.dtype) for value in flat.tolist()]
-        lines.append(f"static const {c_type} {name}[{flat.numel()}] = {{")
-        for index in range(0, len(values), 8):
-            chunk = ", ".join(values[index : index + 8])
-            lines.append(f"    {chunk},")
-        if values:
-            lines[-1] = lines[-1].rstrip(",")
+        dims = "".join(f"[{dim}]" for dim in shape)
+        lines.append(f"static const {c_type} {name}{dims} = {{")
+        lines.extend(_emit_initializer_lines(values, shape))
         lines.append("};")
         lines.append("")
     return lines
