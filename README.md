@@ -24,10 +24,14 @@ This project generates simple, correct, generic, and easily analyzable C code fr
 * Python >= 3.8
 * PyTorch
 * Jinja2
+* Optional (for `cli.onnx2c`): onnx, onnx2torch
 
 ## Setup
 
 ```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements-ci.txt
 pip install -e .
 ```
 
@@ -80,6 +84,12 @@ print(result.c_source)
 ```
 
 ### 3) ONNX to C via CLI
+
+Requires `onnx` and `onnx2torch`:
+
+```bash
+pip install onnx onnx2torch
+```
 
 ```bash
 python -m cli.onnx2c --help
