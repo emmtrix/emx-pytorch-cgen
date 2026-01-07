@@ -53,38 +53,48 @@ def build_kind_handler_registry() -> Dict[OpKind, KindHandlerRegistration]:
     from codegen_backend.emitters.resize import ResizeEmitter
     from codegen_backend.emitters.softmax import SoftmaxEmitter
     from codegen_backend.emitters.view import ViewEmitter
-    from codegen_backend.kinds import (
+    from codegen_backend.groups.builtin.conv.handlers import (
+        Conv1dHandler,
+        Conv2dHandler,
+    )
+    from codegen_backend.groups.builtin.elementwise.handlers import (
+        ElementwiseHandler,
+    )
+    from codegen_backend.groups.builtin.embedding.handlers import (
+        EmbeddingBagHandler,
+        EmbeddingHandler,
+    )
+    from codegen_backend.groups.builtin.pooling.handlers import (
+        Pool1dHandler,
+        Pool2dBackwardHandler,
+        Pool2dHandler,
+        Pool3dHandler,
+    )
+    from codegen_backend.groups.builtin.reductions.handlers import (
+        ArgReductionHandler,
+        ReductionHandler,
+        SoftmaxHandler,
+    )
+    from codegen_backend.groups.builtin.tensor.handlers import (
         AddbmmHandler,
         AddmmHandler,
         AddmvHandler,
         AddrHandler,
         ArangeHandler,
-        ArgReductionHandler,
         BatchNormHandler,
         CdistHandler,
         Col2imHandler,
         ConcatHandler,
-        Conv1dHandler,
-        Conv2dHandler,
         CumsumHandler,
         DiagonalHandler,
-        EmbeddingBagHandler,
-        EmbeddingHandler,
         EmptyStridedHandler,
-        ElementwiseHandler,
         FlipHandler,
         GatherHandler,
         LinearHandler,
         MatmulHandler,
         PadHandler,
         PdistHandler,
-        Pool1dHandler,
-        Pool2dBackwardHandler,
-        Pool2dHandler,
-        Pool3dHandler,
-        ReductionHandler,
         ResizeHandler,
-        SoftmaxHandler,
         ViewHandler,
     )
 
