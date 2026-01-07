@@ -75,211 +75,6 @@ def _kernel_inputs(op_node: _OpNode) -> List[torch.fx.Node]:
     return list(op_node.inputs)
 
 
-def _write_generic_source(
-    graph: _GenericGraph,
-    *,
-    kind_handlers: Dict[OpKind, "OpKindHandler"],
-    templates_env: Any,
-) -> str:
-    placeholders = graph.tensor_placeholders
-    op_nodes = graph.op_nodes
-    headers = [
-        "#include <stdint.h>",
-        "#include <stdbool.h>",
-        f"#include \"{graph.dtype.scalar_header}\"",
-    ]
-    kernels: List[str] = []
-    for index, op_node in enumerate(op_nodes, start=1):
-        handler = kind_handlers.get(op_node.spec.kind)
-        if handler is None:
-            raise CodegenBackendError(
-                "codegen backend does not support kind "
-                f"'{op_node.spec.kind.value}'"
-            )
-        handler.postprocess(op_node, graph)
-        kernel_lines = handler.emit(index, op_node, graph)
-        kernels.append("\n".join(kernel_lines))
-    input_args = ", ".join(
-        [
-            (
-                f"const {_input_c_type(graph.dtypes[node], graph.dtype)} "
-                f"input_{idx}{_format_array_suffix(graph.shapes[node])}"
-            )
-            for idx, node in enumerate(placeholders)
-        ]
-    )
-    input_args = f"{input_args}, " if input_args else ""
-    output_dtype = graph.dtypes[graph.output_value]
-    output_c_type = _dtype_to_c_type(output_dtype, graph.dtype)
-    signature = (
-        f"void ref_codegen_main_{graph.dtype.suffix}("
-        f"{input_args}{output_c_type} out{_format_array_suffix(graph.shapes[graph.output_value])}) {{"
-    )
-    name_map: Dict[torch.fx.Node, str] = {}
-    for idx, placeholder in enumerate(placeholders):
-        name_map[placeholder] = f"input_{idx}"
-    temp_index = 0
-    temp_decls: List[str] = []
-    for op_node in op_nodes:
-        if op_node.node is graph.output_value:
-            if op_node.inplace_input is not None:
-                name_map[op_node.node] = name_map[op_node.inputs[op_node.inplace_input]]
-            else:
-                name_map[op_node.node] = "out"
-            continue
-        if op_node.inplace_input is not None:
-            name_map[op_node.node] = name_map[op_node.inputs[op_node.inplace_input]]
-            continue
-        temp_name = f"tmp_{temp_index}"
-        temp_index += 1
-        name_map[op_node.node] = temp_name
-        temp_dtype = graph.dtypes[op_node.node]
-        temp_c_type = _dtype_to_c_type(temp_dtype, graph.dtype)
-        temp_decls.append(
-            f"{temp_c_type} {temp_name}{_format_array_suffix(op_node.output_shape)};"
-        )
-    call_lines: List[str] = []
-    for index, op_node in enumerate(op_nodes, start=1):
-        input_names = [
-            name_map[_resolve_alias(arg, graph.alias_map)]
-            for arg in _kernel_inputs(op_node)
-        ]
-        output_name = name_map[op_node.node]
-        args = ", ".join([*input_names, output_name])
-        call_lines.append(
-            f"node{index}_{op_node.spec.name}_{graph.dtype.suffix}({args});"
-        )
-    template = templates_env.get_template("generic_source.c.j2")
-    return (
-        template.render(
-            headers=headers,
-            kernels=kernels,
-            signature=signature,
-            temp_decls=temp_decls,
-            call_lines=call_lines,
-        )
-        + "\n"
-    )
-
-
-def _iter_example_tensors(example_inputs: Sequence[object]) -> Iterable[torch.Tensor]:
-    for example in example_inputs:
-        if isinstance(example, torch.Tensor):
-            yield example
-            continue
-        if isinstance(example, (list, tuple)):
-            for item in example:
-                if isinstance(item, torch.Tensor):
-                    yield item
-                elif isinstance(item, (list, tuple)):
-                    yield from _iter_example_tensors(item)
-
-
-def _validate_example_inputs(
-    example_inputs: Sequence[object],
-) -> _CodegenDType | None:
-    all_tensor_examples = list(_iter_example_tensors(example_inputs))
-    tensor_examples = [
-        example
-        for example in all_tensor_examples
-        if example.dtype in _CODEGEN_DTYPES
-    ]
-    if not tensor_examples:
-        if all_tensor_examples:
-            raise CodegenBackendError(
-                "codegen backend supports only torch.float32, torch.int8, torch.int32, or torch.bool tensors"
-            )
-        return None
-    for example in _iter_example_tensors(example_inputs):
-        if example.device.type != "cpu":
-            raise CodegenBackendError("codegen backend supports only CPU tensors")
-    non_bool_examples = [
-        example for example in tensor_examples if example.dtype is not torch.bool
-    ]
-    if non_bool_examples:
-        non_bool_dtypes = {example.dtype for example in non_bool_examples}
-        non_index_dtypes = {
-            dtype
-            for dtype in non_bool_dtypes
-            if dtype not in _EMBEDDING_INDEX_DTYPES
-        }
-        if len(non_index_dtypes) > 1:
-            raise CodegenBackendError(
-                "codegen backend expects all tensors to share a dtype"
-            )
-        if non_index_dtypes:
-            first_dtype = next(iter(non_index_dtypes))
-        else:
-            first_dtype = next(iter(non_bool_dtypes))
-    else:
-        first_dtype = torch.bool
-    dtype_info = _CODEGEN_DTYPES.get(first_dtype)
-    if dtype_info is None:
-        raise CodegenBackendError(
-            "codegen backend supports only torch.float32, torch.int8, torch.int32, or torch.bool tensors"
-        )
-    for example in tensor_examples:
-        if example.dtype is torch.bool:
-            continue
-        if (
-            example.dtype is not first_dtype
-            and example.dtype not in _EMBEDDING_INDEX_DTYPES
-        ):
-            raise CodegenBackendError(
-                "codegen backend expects all tensors to share a dtype"
-            )
-    return dtype_info
-
-
-def _infer_empty_strided_dtype(
-    gm: torch.fx.GraphModule,
-    *,
-    target_registry: Dict[object, "_TargetInfo"],
-    kind_handlers: Dict[OpKind, "OpKindHandler"],
-) -> _CodegenDType | None:
-    dtype_value = None
-    for node in gm.graph.nodes:
-        if node.op != "call_function":
-            continue
-        target_info = target_registry.get(node.target)
-        if target_info is None:
-            continue
-        handler = kind_handlers.get(target_info.op_spec.kind)
-        if handler is None:
-            continue
-        node_dtype = handler.infer_graph_dtype(node, target_info.op_spec)
-        if node_dtype is None:
-            continue
-        if dtype_value is None:
-            dtype_value = node_dtype
-        elif dtype_value is not node_dtype:
-            raise CodegenBackendError(
-                "codegen empty_strided requires a consistent dtype"
-            )
-    if dtype_value is None:
-        return None
-    dtype_info = _CODEGEN_DTYPES.get(dtype_value)
-    if dtype_info is None:
-        raise CodegenBackendError(
-            "codegen empty_strided supports only torch.float32, torch.int8, torch.int32, or torch.bool tensors"
-        )
-    return dtype_info
-
-
-def _unwrap_output_node(output_node: torch.fx.Node) -> Tuple[torch.fx.Node, object]:
-    output_value = output_node.args[0]
-    output_structure = output_value
-    if isinstance(output_value, (tuple, list, immutable_list)):
-        if not output_value:
-            raise CodegenBackendError("codegen backend expects a non-empty output list")
-        if not all(isinstance(item, torch.fx.Node) for item in output_value):
-            raise CodegenBackendError("codegen backend expects output nodes only")
-        output_value = output_value[0]
-    if not isinstance(output_value, torch.fx.Node):
-        raise CodegenBackendError("codegen backend expects a single output node")
-    return output_value, output_structure
-
-
 def _infer_output_shape(
     op_node: _OpNode,
     input_shapes: Sequence[Tuple[int, ...]],
@@ -2878,404 +2673,323 @@ def _parse_where_inputs(
     return input_nodes, input_shapes, params
 
 
-def _analyze_generic_graph(
-    gm: torch.fx.GraphModule,
-    example_inputs: Sequence[object],
-    *,
-    group_analyzers: Sequence[GroupAnalyzer],
-    target_registry: Dict[object, "_TargetInfo"],
-    kind_handlers: Dict[OpKind, "OpKindHandler"],
-) -> _GenericGraph:
-    tensor_examples = list(_iter_example_tensors(example_inputs))
-    if tensor_examples:
-        dtype_info = _validate_example_inputs(example_inputs)
-    else:
-        dtype_info = _infer_empty_strided_dtype(
-            gm,
-            target_registry=target_registry,
-            kind_handlers=kind_handlers,
-        )
-    output_node = None
-    placeholders: List[torch.fx.Node] = []
-    tensor_placeholders: List[torch.fx.Node] = []
-    op_nodes: List[_OpNode] = []
-    shapes: Dict[torch.fx.Node, Tuple[int, ...]] = {}
-    strides: Dict[torch.fx.Node, Tuple[int, ...]] = {}
-    dtypes: Dict[torch.fx.Node, torch.dtype] = {}
-    scalar_values: Dict[torch.fx.Node, object] = {}
-    alias_map: Dict[torch.fx.Node, torch.fx.Node] = {}
-    empty_outputs: set[torch.fx.Node] = set()
-    input_iter = iter(example_inputs)
+class Parser:
+    def __init__(
+        self,
+        *,
+        kind_handlers: Callable[[], Dict[OpKind, "OpKindHandler"]],
+        target_registry: Callable[[], Dict[object, "_TargetInfo"]],
+    ) -> None:
+        self._kind_handlers = kind_handlers
+        self._target_registry = target_registry
 
-    for node in gm.graph.nodes:
-        if node.op == "placeholder":
-            try:
-                example = next(input_iter)
-            except StopIteration as exc:
+    def resolve_dtype_info(
+        self,
+        gm: torch.fx.GraphModule,
+        example_inputs: Sequence[object],
+    ) -> _CodegenDType | None:
+        tensor_examples = list(self._iter_example_tensors(example_inputs))
+        if tensor_examples:
+            return self._validate_example_inputs(example_inputs)
+        return self._infer_empty_strided_dtype(gm)
+
+    def unwrap_output_node(
+        self, output_node: torch.fx.Node
+    ) -> Tuple[torch.fx.Node, object]:
+        output_value = output_node.args[0]
+        output_structure = output_value
+        if isinstance(output_value, (tuple, list, immutable_list)):
+            if not output_value:
                 raise CodegenBackendError(
-                    "codegen backend expects example inputs to match placeholder count"
-                ) from exc
-            placeholders.append(node)
+                    "codegen backend expects a non-empty output list"
+                )
+            if not all(isinstance(item, torch.fx.Node) for item in output_value):
+                raise CodegenBackendError("codegen backend expects output nodes only")
+            output_value = output_value[0]
+        if not isinstance(output_value, torch.fx.Node):
+            raise CodegenBackendError("codegen backend expects a single output node")
+        return output_value, output_structure
+
+    def _iter_example_tensors(
+        self, example_inputs: Sequence[object]
+    ) -> Iterable[torch.Tensor]:
+        for example in example_inputs:
             if isinstance(example, torch.Tensor):
-                if example.dtype not in _CODEGEN_DTYPES:
-                    if example.dtype in _EMBEDDING_INDEX_DTYPES:
-                        shapes[node] = tuple(example.shape)
-                        strides[node] = tuple(example.stride())
-                        dtypes[node] = example.dtype
-                        tensor_placeholders.append(node)
-                    elif example.numel() == 1:
-                        continue
-                    continue
-                shapes[node] = tuple(example.shape)
-                strides[node] = tuple(example.stride())
-                dtypes[node] = example.dtype
-                tensor_placeholders.append(node)
-            else:
-                if isinstance(example, numbers.Number):
-                    scalar_values[node] = example
-                else:
-                    try:
-                        scalar_values[node] = operator.index(example)
-                    except TypeError:
-                        pass
-            continue
-        if node.op in {"call_function", "call_method"}:
-            handled = False
-            for analyzer in group_analyzers:
-                if not analyzer.match_node(node):
-                    continue
-                result = analyzer.build_op_node(
-                    node,
-                    dtype_info=dtype_info,
-                    shapes=shapes,
-                    strides=strides,
-                    dtypes=dtypes,
-                    scalar_values=scalar_values,
-                    alias_map=alias_map,
-                    empty_outputs=empty_outputs,
-                    kind_handlers=kind_handlers,
-                )
-                if result.op_node is not None:
-                    op_nodes.append(result.op_node)
-                if result.dtype_info is not None:
-                    dtype_info = result.dtype_info
-                handled = True
-                break
-            if not handled:
-                if node.op == "call_method":
-                    raise CodegenBackendError(
-                        f"Unsupported call_method: {node.target}"
-                    )
-                raise CodegenBackendError(f"Unsupported call_function: {node.target}")
-            continue
-        if node.op == "output":
-            output_node = node
-            continue
-        raise CodegenBackendError(f"Unsupported node op: {node.op}")
+                yield example
+                continue
+            if isinstance(example, (list, tuple)):
+                for item in example:
+                    if isinstance(item, torch.Tensor):
+                        yield item
+                    elif isinstance(item, (list, tuple)):
+                        yield from self._iter_example_tensors(item)
 
-    try:
-        next(input_iter)
-    except StopIteration:
-        pass
-    else:
-        raise CodegenBackendError(
-            "codegen backend expects example inputs to match placeholder count"
-        )
-
-    if not op_nodes:
-        raise CodegenBackendError("codegen backend requires at least one operation")
-    if output_node is None:
-        raise CodegenBackendError("codegen backend requires an output node")
-    if not tensor_placeholders and dtype_info is None:
-        raise CodegenBackendError(
-            "codegen backend requires at least one tensor input or a factory op dtype"
-        )
-    if dtype_info is None:
-        raise CodegenBackendError("codegen backend could not infer a graph dtype")
-    output_value, output_structure = _unwrap_output_node(output_node)
-    while output_value in alias_map:
-        output_value = alias_map[output_value]
-    if output_value not in shapes:
-        raise CodegenBackendError("codegen backend expects a single output node")
-    if output_value not in {op.node for op in op_nodes}:
-        raise CodegenBackendError("codegen backend output must be an operator result")
-
-    output_op = next(op for op in op_nodes if op.node is output_value)
-    for op_node in op_nodes:
-        if (
-            op_node.spec.kind == OpKind.EMPTY_STRIDED
-            and op_node.node is not output_value
-            and not _is_contiguous(op_node.output_shape, strides[op_node.node])
-        ):
-            raise CodegenBackendError(
-                "codegen empty_strided supports non-contiguous strides only for outputs"
-            )
-
-    output_inplace_input = None
-    for op_node in op_nodes:
-        if op_node.node is output_value and op_node.inplace_input is not None:
-            candidate = op_node.inputs[op_node.inplace_input]
-            if candidate in tensor_placeholders:
-                output_inplace_input = candidate
-            break
-
-    return _GenericGraph(
-        placeholders=placeholders,
-        tensor_placeholders=tensor_placeholders,
-        op_nodes=op_nodes,
-        output_node=output_node,
-        output_value=output_value,
-        output_op=output_op,
-        output_inplace_input=output_inplace_input,
-        output_structure=output_structure,
-        shapes=shapes,
-        strides=strides,
-        dtypes=dtypes,
-        dtype=dtype_info,
-        alias_map=alias_map,
-        empty_outputs=empty_outputs,
-    )
-
-
-def _compile_generic_library(
-    graph: _GenericGraph,
-    *,
-    write_generic_source: Callable[[_GenericGraph], str],
-) -> _GenericLibrary:
-    source = write_generic_source(graph)
-    digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
-    entry_name = f"ref_codegen_main_{graph.dtype.suffix}"
-    input_shapes = tuple(graph.shapes[node] for node in graph.tensor_placeholders)
-    input_strides = tuple(graph.strides[node] for node in graph.tensor_placeholders)
-    return compile_or_load(
-        source,
-        digest,
-        entry_name=entry_name,
-        include_dirs=[_C_SRC_DIR],
-        input_shapes=input_shapes,
-        input_strides=input_strides,
-        output_shape=graph.shapes[graph.output_value],
-        dtype=graph.dtype,
-    )
-
-
-def _validate_runtime_inputs(
-    inputs: Iterable[torch.Tensor],
-    expected_dtypes: Sequence[torch.dtype],
-    graph_dtype: _CodegenDType,
-) -> None:
-    for tensor, expected_dtype in zip(inputs, expected_dtypes):
-        if expected_dtype is torch.bool:
-            if tensor.dtype is not torch.bool:
+    def _validate_example_inputs(
+        self, example_inputs: Sequence[object]
+    ) -> _CodegenDType | None:
+        all_tensor_examples = list(self._iter_example_tensors(example_inputs))
+        tensor_examples = [
+            example
+            for example in all_tensor_examples
+            if example.dtype in _CODEGEN_DTYPES
+        ]
+        if not tensor_examples:
+            if all_tensor_examples:
                 raise CodegenBackendError(
-                    "codegen backend expects boolean condition tensors"
+                    "codegen backend supports only torch.float32, torch.int8, torch.int32, or torch.bool tensors"
                 )
-        elif expected_dtype in _EMBEDDING_INDEX_DTYPES:
-            if tensor.dtype is not expected_dtype:
-                raise CodegenBackendError(
-                    "codegen backend expects int32 or int64 index tensors"
-                )
-        elif tensor.dtype is not graph_dtype.torch_dtype:
-            raise CodegenBackendError(
-                f"codegen backend supports only {graph_dtype.torch_dtype} tensors"
-            )
-        if tensor.device.type != "cpu":
-            raise CodegenBackendError("codegen backend supports only CPU tensors")
-
-
-def _compile_graph(
-    gm: torch.fx.GraphModule,
-    example_inputs: List[object],
-    *,
-    analyze_generic_graph: Callable[
-        [torch.fx.GraphModule, Sequence[object]], _GenericGraph
-    ],
-    compile_generic_library: Callable[[_GenericGraph], _GenericLibrary],
-) -> Callable[..., torch.Tensor]:
-    graph = analyze_generic_graph(gm, example_inputs)
-    conv_contiguous_indices = tuple(
-        sorted(
-            {
-                graph.tensor_placeholders.index(input_node)
-                for op_node in graph.op_nodes
-                if op_node.spec.kind in {OpKind.CONV1D, OpKind.CONV2D}
-                for input_node in op_node.inputs
-                if input_node in graph.tensor_placeholders
+            return None
+        for example in self._iter_example_tensors(example_inputs):
+            if example.device.type != "cpu":
+                raise CodegenBackendError("codegen backend supports only CPU tensors")
+        non_bool_examples = [
+            example for example in tensor_examples if example.dtype is not torch.bool
+        ]
+        if non_bool_examples:
+            non_bool_dtypes = {example.dtype for example in non_bool_examples}
+            non_index_dtypes = {
+                dtype
+                for dtype in non_bool_dtypes
+                if dtype not in _EMBEDDING_INDEX_DTYPES
             }
-        )
-    )
-
-    def _normalize_conv_inputs(
-        inputs: Sequence[object],
-    ) -> List[object]:
-        normalized = list(inputs)
-        for index in conv_contiguous_indices:
-            placeholder = graph.tensor_placeholders[index]
-            placeholder_index = graph.placeholders.index(placeholder)
-            value = normalized[placeholder_index]
-            if isinstance(value, torch.Tensor) and not value.is_contiguous():
-                normalized[placeholder_index] = value.contiguous()
-        return normalized
-
-    normalized_example_inputs = (
-        _normalize_conv_inputs(example_inputs)
-        if conv_contiguous_indices
-        else list(example_inputs)
-    )
-    graph = analyze_generic_graph(gm, normalized_example_inputs)
-    lib = compile_generic_library(graph)
-    output_structure = graph.output_structure
-    output_value = graph.output_value
-    output_inplace_input = graph.output_inplace_input
-    library_cache: Dict[
-        Tuple[Tuple[Tuple[int, ...], ...], Tuple[Tuple[int, ...], ...]],
-        _GenericLibrary,
-    ] = {
-        (lib.input_shapes, lib.input_strides): lib,
-    }
-
-    def _recompile(new_inputs: Sequence[object]) -> None:
-        nonlocal graph, lib, output_inplace_input
-        graph = analyze_generic_graph(gm, _normalize_conv_inputs(new_inputs))
-        lib = compile_generic_library(graph)
-        output_inplace_input = graph.output_inplace_input
-
-    def resolve_output(value: object, env: Dict[torch.fx.Node, object]) -> object:
-        if isinstance(value, torch.fx.Node):
-            return env[value]
-        if isinstance(value, (list, tuple, immutable_list)):
-            resolved = [resolve_output(item, env) for item in value]
-            return type(value)(resolved)
-        return value
-
-    def compiled(*args: object, **kwargs: object) -> object:
-        if kwargs:
-            placeholder_targets = [node.target for node in graph.placeholders]
-            normalized_args = list(args)
-            for name in placeholder_targets[len(normalized_args) :]:
-                if name in kwargs:
-                    normalized_args.append(kwargs[name])
-        else:
-            normalized_args = list(args)
-        if len(normalized_args) != len(graph.placeholders):
-            raise CodegenBackendError(
-                f"codegen backend expects {len(graph.placeholders)} inputs, got {len(normalized_args)}"
-            )
-        env: Dict[torch.fx.Node, object] = {}
-        input_tensors = []
-        for node, value in zip(graph.placeholders, normalized_args):
-            env[node] = value
-            if node in graph.tensor_placeholders:
-                if not isinstance(value, torch.Tensor):
-                    raise CodegenBackendError("codegen backend expects tensor inputs only")
-                input_tensors.append(value)
-        expected_dtypes = [graph.dtypes[node] for node in graph.tensor_placeholders]
-        _validate_runtime_inputs(input_tensors, expected_dtypes, graph.dtype)
-
-        contiguous_inputs = list(input_tensors)
-        if conv_contiguous_indices:
-            for index in conv_contiguous_indices:
-                if not contiguous_inputs[index].is_contiguous():
-                    contiguous_inputs[index] = contiguous_inputs[
-                        index
-                    ].contiguous()
-
-        input_shapes = tuple(tuple(tensor.shape) for tensor in contiguous_inputs)
-        input_strides = tuple(tuple(tensor.stride()) for tensor in contiguous_inputs)
-        cache_key = (input_shapes, input_strides)
-        cached_lib = library_cache.get(cache_key)
-        if cached_lib is None:
-            analysis_inputs = list(normalized_args)
-            if conv_contiguous_indices:
-                for index in conv_contiguous_indices:
-                    placeholder = graph.tensor_placeholders[index]
-                    placeholder_index = graph.placeholders.index(placeholder)
-                    analysis_inputs[placeholder_index] = contiguous_inputs[
-                        index
-                    ]
-            updated_graph = analyze_generic_graph(gm, analysis_inputs)
-            cached_lib = compile_generic_library(updated_graph)
-            library_cache[cache_key] = cached_lib
-        lib = cached_lib
-        if output_inplace_input is not None:
-            original_input = env[output_inplace_input]
-            if not isinstance(original_input, torch.Tensor):
-                raise CodegenBackendError("codegen backend expects tensor inputs only")
-            inplace_index = graph.tensor_placeholders.index(output_inplace_input)
-            inplace_out = contiguous_inputs[inplace_index]
-            lib.run(contiguous_inputs, inplace_out)
-            if inplace_out is not original_input:
-                original_input.copy_(inplace_out)
-            env[output_value] = original_input
-        else:
-            output_dtype = graph.dtypes[output_value]
-            device = (
-                contiguous_inputs[0].device
-                if contiguous_inputs
-                else torch.device("cpu")
-            )
-            if graph.output_op.spec.kind == OpKind.EMPTY_STRIDED:
-                out = torch.empty_strided(
-                    graph.shapes[output_value],
-                    graph.strides[output_value],
-                    dtype=output_dtype,
-                    device=device,
+            if len(non_index_dtypes) > 1:
+                raise CodegenBackendError(
+                    "codegen backend expects all tensors to share a dtype"
                 )
+            if non_index_dtypes:
+                first_dtype = next(iter(non_index_dtypes))
             else:
-                out = torch.empty(
-                    lib.output_shape,
-                    dtype=output_dtype,
-                    device=device,
-                )
-            lib.run(contiguous_inputs, out)
-            env[output_value] = out
-        if graph.alias_map:
-            for alias, source in graph.alias_map.items():
-                resolved = _resolve_alias(source, graph.alias_map)
-                if resolved in env:
-                    env[alias] = env[resolved]
-        if graph.empty_outputs:
-            device = (
-                contiguous_inputs[0].device
-                if contiguous_inputs
-                else torch.device("cpu")
+                first_dtype = next(iter(non_bool_dtypes))
+        else:
+            first_dtype = torch.bool
+        dtype_info = _CODEGEN_DTYPES.get(first_dtype)
+        if dtype_info is None:
+            raise CodegenBackendError(
+                "codegen backend supports only torch.float32, torch.int8, torch.int32, or torch.bool tensors"
             )
-            for node in graph.empty_outputs:
-                if node not in env:
-                    env[node] = torch.empty(
-                        graph.shapes[node],
-                        dtype=graph.dtypes[node],
-                        device=device,
-                    )
-        return resolve_output(output_structure, env)
+        for example in tensor_examples:
+            if example.dtype is torch.bool:
+                continue
+            if (
+                example.dtype is not first_dtype
+                and example.dtype not in _EMBEDDING_INDEX_DTYPES
+            ):
+                raise CodegenBackendError(
+                    "codegen backend expects all tensors to share a dtype"
+                )
+        return dtype_info
 
-    return compiled
+    def _infer_empty_strided_dtype(
+        self, gm: torch.fx.GraphModule
+    ) -> _CodegenDType | None:
+        dtype_value = None
+        target_registry = self._target_registry()
+        kind_handlers = self._kind_handlers()
+        for node in gm.graph.nodes:
+            if node.op != "call_function":
+                continue
+            target_info = target_registry.get(node.target)
+            if target_info is None:
+                continue
+            handler = kind_handlers.get(target_info.op_spec.kind)
+            if handler is None:
+                continue
+            node_dtype = handler.infer_graph_dtype(node, target_info.op_spec)
+            if node_dtype is None:
+                continue
+            if dtype_value is None:
+                dtype_value = node_dtype
+            elif dtype_value is not node_dtype:
+                raise CodegenBackendError(
+                    "codegen empty_strided requires a consistent dtype"
+                )
+        if dtype_value is None:
+            return None
+        dtype_info = _CODEGEN_DTYPES.get(dtype_value)
+        if dtype_info is None:
+            raise CodegenBackendError(
+                "codegen empty_strided supports only torch.float32, torch.int8, torch.int32, or torch.bool tensors"
+            )
+        return dtype_info
 
 
-class GraphAnalyzer:
+class GraphBuilder:
     def __init__(
         self,
         *,
         group_registry: Callable[[], "GroupRegistry"],
         kind_handlers: Callable[[], Dict[OpKind, "OpKindHandler"]],
+        parser: Parser,
     ) -> None:
         self._group_registry = group_registry
         self._kind_handlers = kind_handlers
+        self._parser = parser
 
-    def analyze(
+    def build(
         self, gm: torch.fx.GraphModule, example_inputs: Sequence[object]
     ) -> _GenericGraph:
         group_registry = self._group_registry()
-        return _analyze_generic_graph(
+        return self._analyze_generic_graph(
             gm,
             example_inputs,
             group_analyzers=group_registry.build_group_analyzers(),
-            target_registry=group_registry.merged_target_registry(),
             kind_handlers=self._kind_handlers(),
         )
 
+    def _analyze_generic_graph(
+        self,
+        gm: torch.fx.GraphModule,
+        example_inputs: Sequence[object],
+        *,
+        group_analyzers: Sequence[GroupAnalyzer],
+        kind_handlers: Dict[OpKind, "OpKindHandler"],
+    ) -> _GenericGraph:
+        dtype_info = self._parser.resolve_dtype_info(gm, example_inputs)
+        output_node = None
+        placeholders: List[torch.fx.Node] = []
+        tensor_placeholders: List[torch.fx.Node] = []
+        op_nodes: List[_OpNode] = []
+        shapes: Dict[torch.fx.Node, Tuple[int, ...]] = {}
+        strides: Dict[torch.fx.Node, Tuple[int, ...]] = {}
+        dtypes: Dict[torch.fx.Node, torch.dtype] = {}
+        scalar_values: Dict[torch.fx.Node, object] = {}
+        alias_map: Dict[torch.fx.Node, torch.fx.Node] = {}
+        empty_outputs: set[torch.fx.Node] = set()
+        input_iter = iter(example_inputs)
 
-class SourceWriter:
+        for node in gm.graph.nodes:
+            if node.op == "placeholder":
+                try:
+                    example = next(input_iter)
+                except StopIteration as exc:
+                    raise CodegenBackendError(
+                        "codegen backend expects example inputs to match placeholder count"
+                    ) from exc
+                placeholders.append(node)
+                if isinstance(example, torch.Tensor):
+                    if example.dtype not in _CODEGEN_DTYPES:
+                        if example.dtype in _EMBEDDING_INDEX_DTYPES:
+                            shapes[node] = tuple(example.shape)
+                            strides[node] = tuple(example.stride())
+                            dtypes[node] = example.dtype
+                            tensor_placeholders.append(node)
+                        elif example.numel() == 1:
+                            continue
+                        continue
+                    shapes[node] = tuple(example.shape)
+                    strides[node] = tuple(example.stride())
+                    dtypes[node] = example.dtype
+                    tensor_placeholders.append(node)
+                else:
+                    if isinstance(example, numbers.Number):
+                        scalar_values[node] = example
+                    else:
+                        try:
+                            scalar_values[node] = operator.index(example)
+                        except TypeError:
+                            pass
+                continue
+            if node.op in {"call_function", "call_method"}:
+                handled = False
+                for analyzer in group_analyzers:
+                    if not analyzer.match_node(node):
+                        continue
+                    result = analyzer.build_op_node(
+                        node,
+                        dtype_info=dtype_info,
+                        shapes=shapes,
+                        strides=strides,
+                        dtypes=dtypes,
+                        scalar_values=scalar_values,
+                        alias_map=alias_map,
+                        empty_outputs=empty_outputs,
+                        kind_handlers=kind_handlers,
+                    )
+                    if result.op_node is not None:
+                        op_nodes.append(result.op_node)
+                    if result.dtype_info is not None:
+                        dtype_info = result.dtype_info
+                    handled = True
+                    break
+                if not handled:
+                    if node.op == "call_method":
+                        raise CodegenBackendError(
+                            f"Unsupported call_method: {node.target}"
+                        )
+                    raise CodegenBackendError(
+                        f"Unsupported call_function: {node.target}"
+                    )
+                continue
+            if node.op == "output":
+                output_node = node
+                continue
+            raise CodegenBackendError(f"Unsupported node op: {node.op}")
+
+        try:
+            next(input_iter)
+        except StopIteration:
+            pass
+        else:
+            raise CodegenBackendError(
+                "codegen backend expects example inputs to match placeholder count"
+            )
+
+        if not op_nodes:
+            raise CodegenBackendError("codegen backend requires at least one operation")
+        if output_node is None:
+            raise CodegenBackendError("codegen backend requires an output node")
+        if not tensor_placeholders and dtype_info is None:
+            raise CodegenBackendError(
+                "codegen backend requires at least one tensor input or a factory op dtype"
+            )
+        if dtype_info is None:
+            raise CodegenBackendError("codegen backend could not infer a graph dtype")
+        output_value, output_structure = self._parser.unwrap_output_node(output_node)
+        while output_value in alias_map:
+            output_value = alias_map[output_value]
+        if output_value not in shapes:
+            raise CodegenBackendError("codegen backend expects a single output node")
+        if output_value not in {op.node for op in op_nodes}:
+            raise CodegenBackendError("codegen backend output must be an operator result")
+
+        output_op = next(op for op in op_nodes if op.node is output_value)
+        for op_node in op_nodes:
+            if (
+                op_node.spec.kind == OpKind.EMPTY_STRIDED
+                and op_node.node is not output_value
+                and not _is_contiguous(op_node.output_shape, strides[op_node.node])
+            ):
+                raise CodegenBackendError(
+                    "codegen empty_strided supports non-contiguous strides only for outputs"
+                )
+
+        output_inplace_input = None
+        for op_node in op_nodes:
+            if op_node.node is output_value and op_node.inplace_input is not None:
+                candidate = op_node.inputs[op_node.inplace_input]
+                if candidate in tensor_placeholders:
+                    output_inplace_input = candidate
+                break
+
+        return _GenericGraph(
+            placeholders=placeholders,
+            tensor_placeholders=tensor_placeholders,
+            op_nodes=op_nodes,
+            output_node=output_node,
+            output_value=output_value,
+            output_op=output_op,
+            output_inplace_input=output_inplace_input,
+            output_structure=output_structure,
+            shapes=shapes,
+            strides=strides,
+            dtypes=dtypes,
+            dtype=dtype_info,
+            alias_map=alias_map,
+            empty_outputs=empty_outputs,
+        )
+
+
+class Emitter:
     def __init__(
         self,
         *,
@@ -3285,39 +2999,325 @@ class SourceWriter:
         self._templates_env = templates_env
         self._kind_handlers = kind_handlers
 
-    def write(self, graph: _GenericGraph) -> str:
-        return _write_generic_source(
-            graph,
-            kind_handlers=self._kind_handlers(),
-            templates_env=self._templates_env(),
+    def emit(self, graph: _GenericGraph) -> str:
+        return self._write_generic_source(graph)
+
+    def _write_generic_source(self, graph: _GenericGraph) -> str:
+        placeholders = graph.tensor_placeholders
+        op_nodes = graph.op_nodes
+        headers = [
+            "#include <stdint.h>",
+            "#include <stdbool.h>",
+            f"#include \"{graph.dtype.scalar_header}\"",
+        ]
+        kernels: List[str] = []
+        kind_handlers = self._kind_handlers()
+        for index, op_node in enumerate(op_nodes, start=1):
+            handler = kind_handlers.get(op_node.spec.kind)
+            if handler is None:
+                raise CodegenBackendError(
+                    "codegen backend does not support kind "
+                    f"'{op_node.spec.kind.value}'"
+                )
+            handler.postprocess(op_node, graph)
+            kernel_lines = handler.emit(index, op_node, graph)
+            kernels.append("\n".join(kernel_lines))
+        input_args = ", ".join(
+            [
+                (
+                    f"const {_input_c_type(graph.dtypes[node], graph.dtype)} "
+                    f"input_{idx}{_format_array_suffix(graph.shapes[node])}"
+                )
+                for idx, node in enumerate(placeholders)
+            ]
+        )
+        input_args = f"{input_args}, " if input_args else ""
+        output_dtype = graph.dtypes[graph.output_value]
+        output_c_type = _dtype_to_c_type(output_dtype, graph.dtype)
+        signature = (
+            f"void ref_codegen_main_{graph.dtype.suffix}("
+            f"{input_args}{output_c_type} out{_format_array_suffix(graph.shapes[graph.output_value])}) {{"
+        )
+        name_map: Dict[torch.fx.Node, str] = {}
+        for idx, placeholder in enumerate(placeholders):
+            name_map[placeholder] = f"input_{idx}"
+        temp_index = 0
+        temp_decls: List[str] = []
+        for op_node in op_nodes:
+            if op_node.node is graph.output_value:
+                if op_node.inplace_input is not None:
+                    name_map[op_node.node] = name_map[
+                        op_node.inputs[op_node.inplace_input]
+                    ]
+                else:
+                    name_map[op_node.node] = "out"
+                continue
+            if op_node.inplace_input is not None:
+                name_map[op_node.node] = name_map[
+                    op_node.inputs[op_node.inplace_input]
+                ]
+                continue
+            temp_name = f"tmp_{temp_index}"
+            temp_index += 1
+            name_map[op_node.node] = temp_name
+            temp_dtype = graph.dtypes[op_node.node]
+            temp_c_type = _dtype_to_c_type(temp_dtype, graph.dtype)
+            temp_decls.append(
+                f"{temp_c_type} {temp_name}{_format_array_suffix(op_node.output_shape)};"
+            )
+        call_lines: List[str] = []
+        for index, op_node in enumerate(op_nodes, start=1):
+            input_names = [
+                name_map[_resolve_alias(arg, graph.alias_map)]
+                for arg in _kernel_inputs(op_node)
+            ]
+            output_name = name_map[op_node.node]
+            args = ", ".join([*input_names, output_name])
+            call_lines.append(
+                f"node{index}_{op_node.spec.name}_{graph.dtype.suffix}({args});"
+            )
+        template = self._templates_env().get_template("generic_source.c.j2")
+        return (
+            template.render(
+                headers=headers,
+                kernels=kernels,
+                signature=signature,
+                temp_decls=temp_decls,
+                call_lines=call_lines,
+            )
+            + "\n"
         )
 
 
-class CompilePipeline:
-    def __init__(self, analyzer: GraphAnalyzer, writer: SourceWriter) -> None:
-        self._analyzer = analyzer
-        self._writer = writer
+class Compiler:
+    def __init__(self, builder: GraphBuilder, emitter: Emitter) -> None:
+        self._builder = builder
+        self._emitter = emitter
 
     def get_source(
         self, gm: torch.fx.GraphModule, example_inputs: Sequence[object]
     ) -> str:
-        graph = self._analyzer.analyze(gm, example_inputs)
-        return self._writer.write(graph)
+        graph = self._builder.build(gm, example_inputs)
+        return self._emitter.emit(graph)
 
     def compile_library(self, graph: _GenericGraph) -> _GenericLibrary:
-        return _compile_generic_library(
-            graph, write_generic_source=self._writer.write
-        )
+        return self._compile_generic_library(graph)
 
     def compile_graph(
         self, gm: torch.fx.GraphModule, example_inputs: List[object]
     ) -> Callable[..., torch.Tensor]:
-        return _compile_graph(
-            gm,
-            example_inputs,
-            analyze_generic_graph=self._analyzer.analyze,
-            compile_generic_library=self.compile_library,
+        return self._compile_graph(gm, example_inputs)
+
+    def _compile_generic_library(self, graph: _GenericGraph) -> _GenericLibrary:
+        source = self._emitter.emit(graph)
+        digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
+        entry_name = f"ref_codegen_main_{graph.dtype.suffix}"
+        input_shapes = tuple(graph.shapes[node] for node in graph.tensor_placeholders)
+        input_strides = tuple(graph.strides[node] for node in graph.tensor_placeholders)
+        return compile_or_load(
+            source,
+            digest,
+            entry_name=entry_name,
+            include_dirs=[_C_SRC_DIR],
+            input_shapes=input_shapes,
+            input_strides=input_strides,
+            output_shape=graph.shapes[graph.output_value],
+            dtype=graph.dtype,
         )
+
+    def _validate_runtime_inputs(
+        self,
+        inputs: Iterable[torch.Tensor],
+        expected_dtypes: Sequence[torch.dtype],
+        graph_dtype: _CodegenDType,
+    ) -> None:
+        for tensor, expected_dtype in zip(inputs, expected_dtypes):
+            if expected_dtype is torch.bool:
+                if tensor.dtype is not torch.bool:
+                    raise CodegenBackendError(
+                        "codegen backend expects boolean condition tensors"
+                    )
+            elif expected_dtype in _EMBEDDING_INDEX_DTYPES:
+                if tensor.dtype is not expected_dtype:
+                    raise CodegenBackendError(
+                        "codegen backend expects int32 or int64 index tensors"
+                    )
+            elif tensor.dtype is not graph_dtype.torch_dtype:
+                raise CodegenBackendError(
+                    f"codegen backend supports only {graph_dtype.torch_dtype} tensors"
+                )
+            if tensor.device.type != "cpu":
+                raise CodegenBackendError("codegen backend supports only CPU tensors")
+
+    def _compile_graph(
+        self, gm: torch.fx.GraphModule, example_inputs: List[object]
+    ) -> Callable[..., torch.Tensor]:
+        graph = self._builder.build(gm, example_inputs)
+        conv_contiguous_indices = tuple(
+            sorted(
+                {
+                    graph.tensor_placeholders.index(input_node)
+                    for op_node in graph.op_nodes
+                    if op_node.spec.kind in {OpKind.CONV1D, OpKind.CONV2D}
+                    for input_node in op_node.inputs
+                    if input_node in graph.tensor_placeholders
+                }
+            )
+        )
+
+        def _normalize_conv_inputs(
+            inputs: Sequence[object],
+        ) -> List[object]:
+            normalized = list(inputs)
+            for index in conv_contiguous_indices:
+                placeholder = graph.tensor_placeholders[index]
+                placeholder_index = graph.placeholders.index(placeholder)
+                value = normalized[placeholder_index]
+                if isinstance(value, torch.Tensor) and not value.is_contiguous():
+                    normalized[placeholder_index] = value.contiguous()
+            return normalized
+
+        normalized_example_inputs = (
+            _normalize_conv_inputs(example_inputs)
+            if conv_contiguous_indices
+            else list(example_inputs)
+        )
+        graph = self._builder.build(gm, normalized_example_inputs)
+        lib = self._compile_generic_library(graph)
+        output_structure = graph.output_structure
+        output_value = graph.output_value
+        output_inplace_input = graph.output_inplace_input
+        library_cache: Dict[
+            Tuple[Tuple[Tuple[int, ...], ...], Tuple[Tuple[int, ...], ...]],
+            _GenericLibrary,
+        ] = {
+            (lib.input_shapes, lib.input_strides): lib,
+        }
+
+        def _recompile(new_inputs: Sequence[object]) -> None:
+            nonlocal graph, lib, output_inplace_input
+            graph = self._builder.build(gm, _normalize_conv_inputs(new_inputs))
+            lib = self._compile_generic_library(graph)
+            output_inplace_input = graph.output_inplace_input
+
+        def resolve_output(value: object, env: Dict[torch.fx.Node, object]) -> object:
+            if isinstance(value, torch.fx.Node):
+                return env[value]
+            if isinstance(value, (list, tuple, immutable_list)):
+                resolved = [resolve_output(item, env) for item in value]
+                return type(value)(resolved)
+            return value
+
+        def compiled(*args: object, **kwargs: object) -> object:
+            if kwargs:
+                placeholder_targets = [node.target for node in graph.placeholders]
+                normalized_args = list(args)
+                for name in placeholder_targets[len(normalized_args) :]:
+                    if name in kwargs:
+                        normalized_args.append(kwargs[name])
+            else:
+                normalized_args = list(args)
+            if len(normalized_args) != len(graph.placeholders):
+                raise CodegenBackendError(
+                    f"codegen backend expects {len(graph.placeholders)} inputs, got {len(normalized_args)}"
+                )
+            env: Dict[torch.fx.Node, object] = {}
+            input_tensors = []
+            for node, value in zip(graph.placeholders, normalized_args):
+                env[node] = value
+                if node in graph.tensor_placeholders:
+                    if not isinstance(value, torch.Tensor):
+                        raise CodegenBackendError(
+                            "codegen backend expects tensor inputs only"
+                        )
+                    input_tensors.append(value)
+            expected_dtypes = [
+                graph.dtypes[node] for node in graph.tensor_placeholders
+            ]
+            self._validate_runtime_inputs(
+                input_tensors, expected_dtypes, graph.dtype
+            )
+
+            contiguous_inputs = list(input_tensors)
+            if conv_contiguous_indices:
+                for index in conv_contiguous_indices:
+                    if not contiguous_inputs[index].is_contiguous():
+                        contiguous_inputs[index] = contiguous_inputs[
+                            index
+                        ].contiguous()
+
+            input_shapes = tuple(tuple(tensor.shape) for tensor in contiguous_inputs)
+            input_strides = tuple(tuple(tensor.stride()) for tensor in contiguous_inputs)
+            cache_key = (input_shapes, input_strides)
+            cached_lib = library_cache.get(cache_key)
+            if cached_lib is None:
+                analysis_inputs = list(normalized_args)
+                if conv_contiguous_indices:
+                    for index in conv_contiguous_indices:
+                        placeholder = graph.tensor_placeholders[index]
+                        placeholder_index = graph.placeholders.index(placeholder)
+                        analysis_inputs[placeholder_index] = contiguous_inputs[
+                            index
+                        ]
+                updated_graph = self._builder.build(gm, analysis_inputs)
+                cached_lib = self._compile_generic_library(updated_graph)
+                library_cache[cache_key] = cached_lib
+            lib = cached_lib
+            if output_inplace_input is not None:
+                original_input = env[output_inplace_input]
+                if not isinstance(original_input, torch.Tensor):
+                    raise CodegenBackendError(
+                        "codegen backend expects tensor inputs only"
+                    )
+                inplace_index = graph.tensor_placeholders.index(output_inplace_input)
+                inplace_out = contiguous_inputs[inplace_index]
+                lib.run(contiguous_inputs, inplace_out)
+                if inplace_out is not original_input:
+                    original_input.copy_(inplace_out)
+                env[output_value] = original_input
+            else:
+                output_dtype = graph.dtypes[output_value]
+                device = (
+                    contiguous_inputs[0].device
+                    if contiguous_inputs
+                    else torch.device("cpu")
+                )
+                if graph.output_op.spec.kind == OpKind.EMPTY_STRIDED:
+                    out = torch.empty_strided(
+                        graph.shapes[output_value],
+                        graph.strides[output_value],
+                        dtype=output_dtype,
+                        device=device,
+                    )
+                else:
+                    out = torch.empty(
+                        lib.output_shape,
+                        dtype=output_dtype,
+                        device=device,
+                    )
+                lib.run(contiguous_inputs, out)
+                env[output_value] = out
+            if graph.alias_map:
+                for alias, source in graph.alias_map.items():
+                    resolved = _resolve_alias(source, graph.alias_map)
+                    if resolved in env:
+                        env[alias] = env[resolved]
+            if graph.empty_outputs:
+                device = (
+                    contiguous_inputs[0].device
+                    if contiguous_inputs
+                    else torch.device("cpu")
+                )
+                for node in graph.empty_outputs:
+                    if node not in env:
+                        env[node] = torch.empty(
+                            graph.shapes[node],
+                            dtype=graph.dtypes[node],
+                            device=device,
+                        )
+            return resolve_output(output_structure, env)
+
+        return compiled
 
 
 class _BackendKernelContext:
@@ -3401,6 +3401,7 @@ class CodegenBackend:
         self,
         *,
         group_registry: object | None = None,
+        analysis_service: GraphAnalysisService | None = None,
         templates_env: object | None = None,
     ) -> None:
         self.group_registry = (
@@ -3412,16 +3413,25 @@ class CodegenBackend:
         self._supported_ops: Dict[str, _OpSpec] | None = None
         self._target_registry: Dict[object, "_TargetInfo"] | None = None
         self._kind_handlers: Dict[OpKind, "OpKindHandler"] | None = None
-        self._analysis_service = GraphAnalysisService(lambda: self.kind_handlers)
-        self._graph_analyzer = GraphAnalyzer(
+        self._analysis_service = (
+            analysis_service
+            if analysis_service is not None
+            else GraphAnalysisService(lambda: self.kind_handlers)
+        )
+        self._parser = Parser(
+            kind_handlers=lambda: self.kind_handlers,
+            target_registry=lambda: self.target_registry,
+        )
+        self._graph_builder = GraphBuilder(
             group_registry=lambda: self.group_registry,
             kind_handlers=lambda: self.kind_handlers,
+            parser=self._parser,
         )
-        self._source_writer = SourceWriter(
+        self._emitter = Emitter(
             templates_env=lambda: self.templates_env,
             kind_handlers=lambda: self.kind_handlers,
         )
-        self._pipeline = CompilePipeline(self._graph_analyzer, self._source_writer)
+        self._compiler = Compiler(self._graph_builder, self._emitter)
         self._context_provider = BackendContextProvider(self)
 
     @property
@@ -3451,20 +3461,20 @@ class CodegenBackend:
     def get_generic_source(
         self, gm: torch.fx.GraphModule, example_inputs: Sequence[object]
     ) -> str:
-        return self._pipeline.get_source(gm, example_inputs)
+        return self._compiler.get_source(gm, example_inputs)
 
     def codegen_generic_backend(
         self, gm: torch.fx.GraphModule, example_inputs: List[object]
     ) -> Callable[..., torch.Tensor]:
-        return self._pipeline.compile_graph(gm, example_inputs)
+        return self._compiler.compile_graph(gm, example_inputs)
 
     def _analyze_generic_graph(
         self, gm: torch.fx.GraphModule, example_inputs: Sequence[object]
     ) -> _GenericGraph:
-        return self._graph_analyzer.analyze(gm, example_inputs)
+        return self._graph_builder.build(gm, example_inputs)
 
     def _write_generic_source(self, graph: _GenericGraph) -> str:
-        return self._source_writer.write(graph)
+        return self._emitter.emit(graph)
 
 
 _DEFAULT_BACKEND = CodegenBackend()
