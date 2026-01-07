@@ -15,11 +15,12 @@ from codegen_backend.graph import _OpNode
 from codegen_backend.indexing import _contiguous_strides
 from codegen_backend.kinds import (
     ArgReductionHandler,
-    HandlerContext,
+    HandlerContextProvider,
     OpKindHandler,
     OpKindHandlerFactory,
     OpNodeBuildResult,
     ReductionHandler,
+    ReductionContext,
     SoftmaxHandler,
 )
 from codegen_backend.specs import OpKind, _OpSpec
@@ -234,7 +235,7 @@ class _BackendSoftmaxHandler(SoftmaxHandler):
         return OpNodeBuildResult(op_node)
 
 
-def build_handlers(context: HandlerContext) -> Dict[OpKind, OpKindHandler]:
+def build_handlers(context: ReductionContext) -> Dict[OpKind, OpKindHandler]:
     return {
         OpKind.REDUCTION: _BackendReductionHandler(context, ReductionEmitter()),
         OpKind.ARG_REDUCTION: _BackendArgReductionHandler(
@@ -246,9 +247,9 @@ def build_handlers(context: HandlerContext) -> Dict[OpKind, OpKindHandler]:
 
 class ReductionsKindHandlerFactory:
     def build_handlers(
-        self, context: HandlerContext
+        self, context_provider: HandlerContextProvider
     ) -> Dict[OpKind, OpKindHandler]:
-        return build_handlers(context)
+        return build_handlers(context_provider.reductions)
 
 
 def build_kind_handler_registrations() -> Dict[OpKind, KindHandlerRegistration]:

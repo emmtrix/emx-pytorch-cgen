@@ -47,13 +47,19 @@ class KernelEmitRequest:
 
 
 class HandlerContext(Protocol):
-    @property
-    def kind_handlers(self) -> Dict[OpKind, "OpKindHandler"]: ...
+    """Base context shared by handler implementations."""
 
     @property
     def analysis_service(self) -> "GraphAnalysisService": ...
 
     def kernel_inputs(self, op_node: "_OpNode") -> List["torch.fx.Node"]: ...
+
+
+class LegacyHandlerContext(HandlerContext, Protocol):
+    """Deprecated monolithic handler context (use per-group interfaces)."""
+
+    @property
+    def kind_handlers(self) -> Dict[OpKind, "OpKindHandler"]: ...
 
     def handle_col2im_node(
         self,
@@ -96,7 +102,6 @@ class HandlerContext(Protocol):
         dtypes: Dict["torch.fx.Node", "torch.dtype"],
     ) -> "_OpNode": ...
 
-
     def handle_diagonal_node(
         self,
         node: "torch.fx.Node",
@@ -128,7 +133,6 @@ class HandlerContext(Protocol):
         dtypes: Dict["torch.fx.Node", "torch.dtype"],
         scalar_values: Dict["torch.fx.Node", object],
     ) -> "_OpNode": ...
-
 
     def handle_flip_node(
         self,
@@ -170,7 +174,6 @@ class HandlerContext(Protocol):
         dtypes: Dict["torch.fx.Node", "torch.dtype"],
     ) -> "_OpNode": ...
 
-
     def handle_view_node(
         self,
         node: "torch.fx.Node",
@@ -180,7 +183,6 @@ class HandlerContext(Protocol):
         strides: Dict["torch.fx.Node", Tuple[int, ...]],
         dtypes: Dict["torch.fx.Node", "torch.dtype"],
     ) -> "_OpNode": ...
-
 
     def handle_fill_node(
         self,
@@ -215,9 +217,215 @@ class HandlerContext(Protocol):
     ) -> "_OpNode": ...
 
 
+class KernelInputsContext(Protocol):
+    def kernel_inputs(self, op_node: "_OpNode") -> List["torch.fx.Node"]: ...
+
+
+class AnalysisContext(Protocol):
+    @property
+    def analysis_service(self) -> "GraphAnalysisService": ...
+
+
+class ElementwiseContext(KernelInputsContext, AnalysisContext, Protocol):
+    pass
+
+
+class ReductionContext(KernelInputsContext, AnalysisContext, Protocol):
+    pass
+
+
+class PoolingContext(KernelInputsContext, AnalysisContext, Protocol):
+    pass
+
+
+class ConvContext(KernelInputsContext, AnalysisContext, Protocol):
+    pass
+
+
+class EmbeddingContext(KernelInputsContext, AnalysisContext, Protocol):
+    pass
+
+
+class TensorContext(KernelInputsContext, AnalysisContext, Protocol):
+    def handle_col2im_node(
+        self,
+        node: "torch.fx.Node",
+        op_spec: "_OpSpec",
+        dtype_info: "_CodegenDType",
+        shapes: Dict["torch.fx.Node", Tuple[int, ...]],
+        strides: Dict["torch.fx.Node", Tuple[int, ...]],
+        dtypes: Dict["torch.fx.Node", "torch.dtype"],
+    ) -> "_OpNode": ...
+
+    def handle_batch_norm_node(
+        self,
+        node: "torch.fx.Node",
+        op_spec: "_OpSpec",
+        dtype_info: "_CodegenDType",
+        shapes: Dict["torch.fx.Node", Tuple[int, ...]],
+        strides: Dict["torch.fx.Node", Tuple[int, ...]],
+        dtypes: Dict["torch.fx.Node", "torch.dtype"],
+        scalar_values: Dict["torch.fx.Node", object],
+    ) -> "_OpNode": ...
+
+    def handle_pdist_node(
+        self,
+        node: "torch.fx.Node",
+        op_spec: "_OpSpec",
+        dtype_info: "_CodegenDType",
+        shapes: Dict["torch.fx.Node", Tuple[int, ...]],
+        strides: Dict["torch.fx.Node", Tuple[int, ...]],
+        dtypes: Dict["torch.fx.Node", "torch.dtype"],
+    ) -> "_OpNode": ...
+
+    def handle_cdist_node(
+        self,
+        node: "torch.fx.Node",
+        op_spec: "_OpSpec",
+        dtype_info: "_CodegenDType",
+        shapes: Dict["torch.fx.Node", Tuple[int, ...]],
+        strides: Dict["torch.fx.Node", Tuple[int, ...]],
+        dtypes: Dict["torch.fx.Node", "torch.dtype"],
+    ) -> "_OpNode": ...
+
+    def handle_diagonal_node(
+        self,
+        node: "torch.fx.Node",
+        op_spec: "_OpSpec",
+        dtype_info: "_CodegenDType",
+        shapes: Dict["torch.fx.Node", Tuple[int, ...]],
+        strides: Dict["torch.fx.Node", Tuple[int, ...]],
+        dtypes: Dict["torch.fx.Node", "torch.dtype"],
+    ) -> "_OpNode": ...
+
+    def handle_addmm_like_node(
+        self,
+        node: "torch.fx.Node",
+        op_spec: "_OpSpec",
+        dtype_info: "_CodegenDType",
+        shapes: Dict["torch.fx.Node", Tuple[int, ...]],
+        strides: Dict["torch.fx.Node", Tuple[int, ...]],
+        dtypes: Dict["torch.fx.Node", "torch.dtype"],
+        inplace_input: int | None,
+    ) -> "_OpNode": ...
+
+    def handle_linear_node(
+        self,
+        node: "torch.fx.Node",
+        op_spec: "_OpSpec",
+        dtype_info: "_CodegenDType",
+        shapes: Dict["torch.fx.Node", Tuple[int, ...]],
+        strides: Dict["torch.fx.Node", Tuple[int, ...]],
+        dtypes: Dict["torch.fx.Node", "torch.dtype"],
+        scalar_values: Dict["torch.fx.Node", object],
+    ) -> "_OpNode": ...
+
+    def handle_flip_node(
+        self,
+        node: "torch.fx.Node",
+        op_spec: "_OpSpec",
+        dtype_info: "_CodegenDType",
+        shapes: Dict["torch.fx.Node", Tuple[int, ...]],
+        strides: Dict["torch.fx.Node", Tuple[int, ...]],
+        dtypes: Dict["torch.fx.Node", "torch.dtype"],
+    ) -> "_OpNode": ...
+
+    def handle_cumsum_node(
+        self,
+        node: "torch.fx.Node",
+        op_spec: "_OpSpec",
+        dtype_info: "_CodegenDType",
+        shapes: Dict["torch.fx.Node", Tuple[int, ...]],
+        strides: Dict["torch.fx.Node", Tuple[int, ...]],
+        dtypes: Dict["torch.fx.Node", "torch.dtype"],
+    ) -> "_OpNode": ...
+
+    def handle_pad_node(
+        self,
+        node: "torch.fx.Node",
+        op_spec: "_OpSpec",
+        dtype_info: "_CodegenDType",
+        shapes: Dict["torch.fx.Node", Tuple[int, ...]],
+        strides: Dict["torch.fx.Node", Tuple[int, ...]],
+        dtypes: Dict["torch.fx.Node", "torch.dtype"],
+    ) -> "_OpNode": ...
+
+    def handle_gather_node(
+        self,
+        node: "torch.fx.Node",
+        op_spec: "_OpSpec",
+        dtype_info: "_CodegenDType",
+        shapes: Dict["torch.fx.Node", Tuple[int, ...]],
+        strides: Dict["torch.fx.Node", Tuple[int, ...]],
+        dtypes: Dict["torch.fx.Node", "torch.dtype"],
+    ) -> "_OpNode": ...
+
+    def handle_view_node(
+        self,
+        node: "torch.fx.Node",
+        op_spec: "_OpSpec",
+        dtype_info: "_CodegenDType",
+        shapes: Dict["torch.fx.Node", Tuple[int, ...]],
+        strides: Dict["torch.fx.Node", Tuple[int, ...]],
+        dtypes: Dict["torch.fx.Node", "torch.dtype"],
+    ) -> "_OpNode": ...
+
+    def handle_fill_node(
+        self,
+        node: "torch.fx.Node",
+        op_spec: "_OpSpec",
+        dtype_info: "_CodegenDType",
+        shapes: Dict["torch.fx.Node", Tuple[int, ...]],
+        strides: Dict["torch.fx.Node", Tuple[int, ...]],
+        dtypes: Dict["torch.fx.Node", "torch.dtype"],
+        inplace_input: int | None,
+    ) -> "_OpNode": ...
+
+    def handle_resize_node(
+        self,
+        node: "torch.fx.Node",
+        op_spec: "_OpSpec",
+        dtype_info: "_CodegenDType",
+        shapes: Dict["torch.fx.Node", Tuple[int, ...]],
+        strides: Dict["torch.fx.Node", Tuple[int, ...]],
+        dtypes: Dict["torch.fx.Node", "torch.dtype"],
+        inplace_input: int | None,
+    ) -> "_OpNode": ...
+
+    def handle_to_copy_node(
+        self,
+        node: "torch.fx.Node",
+        op_spec: "_OpSpec",
+        dtype_info: "_CodegenDType",
+        shapes: Dict["torch.fx.Node", Tuple[int, ...]],
+        strides: Dict["torch.fx.Node", Tuple[int, ...]],
+        dtypes: Dict["torch.fx.Node", "torch.dtype"],
+    ) -> "_OpNode": ...
+
+
+class HandlerContextProvider(Protocol):
+    @property
+    def elementwise(self) -> ElementwiseContext: ...
+
+    @property
+    def reductions(self) -> ReductionContext: ...
+
+    @property
+    def pooling(self) -> PoolingContext: ...
+
+    @property
+    def conv(self) -> ConvContext: ...
+
+    @property
+    def embedding(self) -> EmbeddingContext: ...
+
+    @property
+    def tensor(self) -> TensorContext: ...
+
+
 class OpKindHandlerFactory(Protocol):
     def build_handlers(
-        self, context: HandlerContext
+        self, context_provider: HandlerContextProvider
     ) -> Dict[OpKind, "OpKindHandler"]: ...
 
 
@@ -1825,4 +2033,3 @@ class MatmulHandler(OpKindHandler):
                 "codegen bmm requires inner dimensions to match"
             )
         return (a_shape[0], a_shape[1], b_shape[2])
-

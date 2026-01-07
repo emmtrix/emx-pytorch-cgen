@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Mapping, Protocol, Sequence
 
-from codegen_backend.kinds import HandlerContext, OpKindHandlerFactory
+from codegen_backend.kinds import HandlerContextProvider, OpKindHandlerFactory
 from codegen_backend.registry import _TargetInfo
 from codegen_backend.specs import _OpSpec
 

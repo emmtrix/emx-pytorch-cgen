@@ -8,6 +8,26 @@ from codegen_backend.graph import _OpNode
 from codegen_backend.groups.registry import get_group_registry
 
 
+class _NullContext:
+    @property
+    def analysis_service(self) -> SimpleNamespace:
+        return SimpleNamespace()
+
+    def kernel_inputs(self, op_node: _OpNode) -> list[torch.fx.Node]:
+        return list(op_node.inputs)
+
+
+class _NullContextProvider:
+    def __init__(self) -> None:
+        context = _NullContext()
+        self.elementwise = context
+        self.reductions = context
+        self.pooling = context
+        self.conv = context
+        self.embedding = context
+        self.tensor = context
+
+
 def _make_op_node(
     op_name: str,
     input_count: int,
@@ -31,7 +51,7 @@ def _make_op_node(
 
 
 def test_infer_output_shape_by_handler() -> None:
-    handlers = get_group_registry().build_kind_handlers(SimpleNamespace())
+    handlers = get_group_registry().build_kind_handlers(_NullContextProvider())
     cases = [
         ("arange", [], {"start": 0, "end": 10, "step": 2}, None, False, (5,)),
         ("add", [(2, 3), (1, 3)], {}, None, False, (2, 3)),

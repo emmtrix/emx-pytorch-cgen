@@ -30,7 +30,16 @@ from codegen_backend.indexing import (
     _format_strided_access,
 )
 from codegen_backend.groups.registry import get_group_registry
-from codegen_backend.kinds import HandlerContext, OpNodeBuildResult
+from codegen_backend.kinds import (
+    ConvContext,
+    ElementwiseContext,
+    EmbeddingContext,
+    HandlerContextProvider,
+    OpNodeBuildResult,
+    PoolingContext,
+    ReductionContext,
+    TensorContext,
+)
 from codegen_backend.param_normalize import normalize_int_or_tuple
 from codegen_backend.analysis_helpers import is_out_overload
 from codegen_backend.services import GraphAnalysisService
@@ -3822,18 +3831,39 @@ class CompilePipeline:
         )
 
 
-class BackendContext(HandlerContext):
+class _BackendKernelContext:
     def __init__(self, backend: "CodegenBackend") -> None:
         self._backend = backend
-
-    @property
-    def kind_handlers(self) -> Dict[OpKind, "OpKindHandler"]:
-        return self._backend.kind_handlers
 
     @property
     def analysis_service(self) -> GraphAnalysisService:
         return self._backend.analysis_service
 
+    def kernel_inputs(self, op_node: _OpNode) -> List[torch.fx.Node]:
+        return _kernel_inputs(op_node)
+
+
+class _BackendElementwiseContext(_BackendKernelContext):
+    pass
+
+
+class _BackendReductionContext(_BackendKernelContext):
+    pass
+
+
+class _BackendPoolingContext(_BackendKernelContext):
+    pass
+
+
+class _BackendConvContext(_BackendKernelContext):
+    pass
+
+
+class _BackendEmbeddingContext(_BackendKernelContext):
+    pass
+
+
+class _BackendTensorContext(_BackendKernelContext):
     def handle_col2im_node(
         self,
         node: torch.fx.Node,
@@ -4114,8 +4144,39 @@ class BackendContext(HandlerContext):
             node, op_spec, dtype_info, shapes, strides, dtypes
         )
 
-    def kernel_inputs(self, op_node: _OpNode) -> List[torch.fx.Node]:
-        return _kernel_inputs(op_node)
+
+class BackendContextProvider(HandlerContextProvider):
+    def __init__(self, backend: "CodegenBackend") -> None:
+        self._elementwise = _BackendElementwiseContext(backend)
+        self._reductions = _BackendReductionContext(backend)
+        self._pooling = _BackendPoolingContext(backend)
+        self._conv = _BackendConvContext(backend)
+        self._embedding = _BackendEmbeddingContext(backend)
+        self._tensor = _BackendTensorContext(backend)
+
+    @property
+    def elementwise(self) -> ElementwiseContext:
+        return self._elementwise
+
+    @property
+    def reductions(self) -> ReductionContext:
+        return self._reductions
+
+    @property
+    def pooling(self) -> PoolingContext:
+        return self._pooling
+
+    @property
+    def conv(self) -> ConvContext:
+        return self._conv
+
+    @property
+    def embedding(self) -> EmbeddingContext:
+        return self._embedding
+
+    @property
+    def tensor(self) -> TensorContext:
+        return self._tensor
 
 
 class CodegenBackend:
@@ -4145,7 +4206,7 @@ class CodegenBackend:
             kind_handlers=lambda: self.kind_handlers,
         )
         self._pipeline = CompilePipeline(self._graph_analyzer, self._source_writer)
-        self._handler_context = BackendContext(self)
+        self._context_provider = BackendContextProvider(self)
 
     @property
     def supported_ops(self) -> Dict[str, _OpSpec]:
@@ -4163,7 +4224,7 @@ class CodegenBackend:
     def kind_handlers(self) -> Dict[OpKind, "OpKindHandler"]:
         if self._kind_handlers is None:
             self._kind_handlers = self.group_registry.build_kind_handlers(
-                self._handler_context
+                self._context_provider
             )
         return self._kind_handlers
 
