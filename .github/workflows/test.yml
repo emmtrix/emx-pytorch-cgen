@@ -46,9 +46,6 @@ jobs:
       - name: Zero ccache stats
         run: ccache -z
 
-      - name: Build native backend
-        run: python -m c_ref_backend.build
-
       - name: Show ccache stats
         run: ccache -s
 
