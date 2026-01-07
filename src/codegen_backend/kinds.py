@@ -856,6 +856,13 @@ class ViewHandler(OpKindHandler):
                 for dim, size in enumerate(input_shape)
                 if dim not in remove_dims
             )
+        if op_node.spec.name == "reshape":
+            size = op_node.p("size", None)
+            if size is None:
+                raise CodegenBackendError(
+                    "codegen reshape expects shape to be resolved"
+                )
+            return tuple(size)
         raise CodegenBackendError(f"Unsupported view op: {op_node.spec.name}")
 
 

@@ -2921,6 +2921,100 @@ def _handle_view_node(
         dtypes[node] = dtype_info.torch_dtype
         strides[node] = _contiguous_strides(output_shape)
         return op_node
+    if op_spec.name == "reshape":
+        shape_values: List[object] | None = None
+        shape_arg = None
+        if len(node.args) > 2:
+            shape_values = list(node.args[1:])
+        else:
+            if len(node.args) > 1:
+                shape_arg = node.args[1]
+            if node.kwargs:
+                if "shape" in node.kwargs:
+                    if shape_arg is not None:
+                        raise _error_kwarg_specified_once(op_spec.name, "shape")
+                    shape_arg = node.kwargs["shape"]
+                extra = set(node.kwargs) - {"shape"}
+                if extra:
+                    raise CodegenBackendError(
+                        f"codegen {op_spec.name} got unexpected kwargs: {sorted(extra)}"
+                    )
+            if shape_arg is None:
+                raise CodegenBackendError(
+                    f"codegen {op_spec.name} expects a shape argument"
+                )
+            if isinstance(shape_arg, torch.Size):
+                shape_values = list(shape_arg)
+            elif isinstance(shape_arg, (tuple, list)):
+                shape_values = list(shape_arg)
+            else:
+                shape_values = [shape_arg]
+        if any(isinstance(value, torch.fx.Node) for value in shape_values):
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} expects shape to be constant"
+            )
+        if not _is_contiguous(shapes[input_arg], strides[input_arg]):
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} expects contiguous input"
+            )
+        output_shape: List[int] = []
+        unknown_dim = None
+        known_product = 1
+        for dim in shape_values:
+            dim_value = _parse_constant_int(op_spec.name, "shape", dim)
+            if dim_value == -1:
+                if unknown_dim is not None:
+                    raise CodegenBackendError(
+                        f"codegen {op_spec.name} expects at most one -1 dim"
+                    )
+                unknown_dim = len(output_shape)
+                output_shape.append(-1)
+                continue
+            if dim_value < -1:
+                raise CodegenBackendError(
+                    f"codegen {op_spec.name} expects shape dims >= -1"
+                )
+            output_shape.append(dim_value)
+            known_product *= dim_value
+        input_numel = math.prod(shapes[input_arg])
+        if unknown_dim is not None:
+            if known_product == 0:
+                if input_numel != 0:
+                    raise CodegenBackendError(
+                        f"codegen {op_spec.name} expects shape to match input numel"
+                    )
+                inferred = 0
+            else:
+                if input_numel % known_product != 0:
+                    raise CodegenBackendError(
+                        f"codegen {op_spec.name} expects shape to match input numel"
+                    )
+                inferred = input_numel // known_product
+            output_shape[unknown_dim] = inferred
+        elif known_product != input_numel:
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} expects shape to match input numel"
+            )
+        output_shape_tuple = tuple(output_shape)
+        op_node = _OpNode(
+            node=node,
+            spec=op_spec,
+            inputs=[input_arg],
+            output_shape=(),
+            params={
+                "size": output_shape_tuple,
+                "view_strides": _contiguous_strides(output_shape_tuple),
+                "storage_offset": 0,
+            },
+        )
+        output_shape = _infer_output_shape(
+            op_node, [shapes[input_arg]], kind_handlers=kind_handlers
+        )
+        op_node.output_shape = output_shape
+        shapes[node] = output_shape
+        dtypes[node] = dtype_info.torch_dtype
+        strides[node] = _contiguous_strides(output_shape)
+        return op_node
     if op_spec.name == "squeeze":
         input_shape = shapes[input_arg]
         input_strides = strides[input_arg]
