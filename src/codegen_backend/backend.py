@@ -25,6 +25,8 @@ from codegen_backend.dtypes import (
     _EMBEDDING_INDEX_DTYPES,
     _INTEGER_CODEGEN_DTYPES,
 )
+from codegen_backend.emit.function import emit_function_header
+from codegen_backend.emit.pointers import emit_input_ptr
 from codegen_backend.graph import _GenericGraph, _GenericLibrary, _OpNode
 from codegen_backend.indexing import (
     _contiguous_strides,
@@ -200,26 +202,33 @@ def emit_signature(
     params: Dict[str, object] | None = None,
 ) -> str:
     out_suffix = _format_array_suffix(output_shape)
+    func_name = f"node{node_index}_{op_spec.name}_{dtype.suffix}"
     if op_spec.kind == OpKind.BINARY:
         if len(input_shapes) == 1:
             a_shape = input_shapes[0]
             a_suffix = _format_array_suffix(a_shape)
             a_c_type = _input_c_type(input_dtypes[0], dtype)
-            return (
-                f"void node{node_index}_{op_spec.name}_{dtype.suffix}("
-                f"const {a_c_type} a{a_suffix}, "
-                f"{dtype.c_type} out{out_suffix}) {{"
+            return emit_function_header(
+                func_name,
+                [
+                    f"const {a_c_type} a{a_suffix}",
+                    f"{dtype.c_type} out{out_suffix}",
+                ],
+                qualifiers="void",
             )
         a_shape, b_shape = input_shapes
         a_suffix = _format_array_suffix(a_shape)
         b_suffix = _format_array_suffix(b_shape)
         a_c_type = _input_c_type(input_dtypes[0], dtype)
         b_c_type = _input_c_type(input_dtypes[1], dtype)
-        return (
-            f"void node{node_index}_{op_spec.name}_{dtype.suffix}("
-            f"const {a_c_type} a{a_suffix}, "
-            f"const {b_c_type} b{b_suffix}, "
-            f"{dtype.c_type} out{out_suffix}) {{"
+        return emit_function_header(
+            func_name,
+            [
+                f"const {a_c_type} a{a_suffix}",
+                f"const {b_c_type} b{b_suffix}",
+                f"{dtype.c_type} out{out_suffix}",
+            ],
+            qualifiers="void",
         )
     if op_spec.kind == OpKind.WHERE:
         params = params or {}
@@ -244,16 +253,15 @@ def emit_signature(
             signature_parts.append(f"const {b_c_type} b{b_suffix}")
             input_index += 1
         signature_parts.append(f"{dtype.c_type} out{out_suffix}")
-        return (
-            f"void node{node_index}_{op_spec.name}_{dtype.suffix}("
-            f"{', '.join(signature_parts)}) {{"
+        return emit_function_header(
+            func_name, signature_parts, qualifiers="void"
         )
     a_suffix = _format_array_suffix(input_shapes[0])
     a_c_type = _input_c_type(input_dtypes[0], dtype)
-    return (
-        f"void node{node_index}_{op_spec.name}_{dtype.suffix}("
-        f"const {a_c_type} a{a_suffix}, "
-        f"{dtype.c_type} out{out_suffix}) {{"
+    return emit_function_header(
+        func_name,
+        [f"const {a_c_type} a{a_suffix}", f"{dtype.c_type} out{out_suffix}"],
+        qualifiers="void",
     )
 
 
@@ -591,9 +599,10 @@ def _write_arange_kernel(
     dtype: _CodegenDType,
 ) -> List[str]:
     out_suffix = _format_array_suffix(output_shape)
-    signature = (
-        f"void node{node_index}_{op_node.spec.name}_{dtype.suffix}("
-        f"{dtype.c_type} out{out_suffix}) {{"
+    signature = emit_function_header(
+        f"node{node_index}_{op_node.spec.name}_{dtype.suffix}",
+        [f"{dtype.c_type} out{out_suffix}"],
+        qualifiers="void",
     )
     lines = [signature]
     loop_lines, indent = emit_loops(output_shape)
@@ -721,13 +730,16 @@ def _write_view_kernel(
     input_suffix = _format_array_suffix(input_shape)
     output_suffix = _format_array_suffix(output_shape)
     input_c_type = _input_c_type(input_dtype, dtype)
-    signature = (
-        f"void node{node_index}_{op_node.spec.name}_{dtype.suffix}("
-        f"const {input_c_type} a{input_suffix}, "
-        f"{dtype.c_type} out{output_suffix}) {{"
+    signature = emit_function_header(
+        f"node{node_index}_{op_node.spec.name}_{dtype.suffix}",
+        [
+            f"const {input_c_type} a{input_suffix}",
+            f"{dtype.c_type} out{output_suffix}",
+        ],
+        qualifiers="void",
     )
     lines = [signature]
-    lines.append(f"    const {input_c_type}* a_ptr = (const {input_c_type}*)a;")
+    lines.append(f"    {emit_input_ptr('a', input_c_type)}")
     loop_lines, indent = emit_loops(output_shape)
     lines.extend(loop_lines)
     view_strides = op_node.p("view_strides", ())
@@ -764,13 +776,16 @@ def _write_resize_kernel(
     input_suffix = _format_array_suffix(input_shape)
     output_suffix = _format_array_suffix(output_shape)
     input_c_type = _input_c_type(input_dtype, dtype)
-    signature = (
-        f"void node{node_index}_{op_node.spec.name}_{dtype.suffix}("
-        f"const {input_c_type} a{input_suffix}, "
-        f"{dtype.c_type} out{output_suffix}) {{"
+    signature = emit_function_header(
+        f"node{node_index}_{op_node.spec.name}_{dtype.suffix}",
+        [
+            f"const {input_c_type} a{input_suffix}",
+            f"{dtype.c_type} out{output_suffix}",
+        ],
+        qualifiers="void",
     )
     lines = [signature]
-    lines.append(f"    const {input_c_type}* a_ptr = (const {input_c_type}*)a;")
+    lines.append(f"    {emit_input_ptr('a', input_c_type)}")
     loop_lines, indent = emit_loops(output_shape)
     lines.extend(loop_lines)
     output_contig_strides = _contiguous_strides(output_shape)
@@ -819,9 +834,10 @@ def _write_empty_strided_kernel(
     dtype: _CodegenDType,
 ) -> List[str]:
     output_suffix = _format_array_suffix(output_shape)
-    signature = (
-        f"void node{node_index}_{op_spec.name}_{dtype.suffix}("
-        f"{dtype.c_type} out{output_suffix}) {{"
+    signature = emit_function_header(
+        f"node{node_index}_{op_spec.name}_{dtype.suffix}",
+        [f"{dtype.c_type} out{output_suffix}"],
+        qualifiers="void",
     )
     return [signature, "    (void)out;", "}"]
 
@@ -847,12 +863,16 @@ def _write_matmul_kernel(
             a_suffix = _format_array_suffix((k,))
             b_suffix = _format_array_suffix((k,))
             out_suffix = _format_array_suffix(())
+            func_name = f"node{node_index}_{op_spec.name}_{dtype.suffix}"
             rendered = matmul_template.render(
-                signature=(
-                    f"void node{node_index}_{op_spec.name}_{dtype.suffix}("
-                    f"const {dtype.c_type} a{a_suffix}, "
-                    f"const {dtype.c_type} b{b_suffix}, "
-                    f"{dtype.c_type} out{out_suffix}) {{"
+                signature=emit_function_header(
+                    func_name,
+                    [
+                        f"const {dtype.c_type} a{a_suffix}",
+                        f"const {dtype.c_type} b{b_suffix}",
+                        f"{dtype.c_type} out{out_suffix}",
+                    ],
+                    qualifiers="void",
                 ),
                 batch=None,
                 m=1,
@@ -884,12 +904,16 @@ def _write_matmul_kernel(
         a_suffix = _format_array_suffix((m, k))
         b_suffix = _format_array_suffix((k, n))
         out_suffix = _format_array_suffix((m, n))
+        func_name = f"node{node_index}_{op_spec.name}_{dtype.suffix}"
         rendered = matmul_template.render(
-            signature=(
-                f"void node{node_index}_{op_spec.name}_{dtype.suffix}("
-                f"const {dtype.c_type} a{a_suffix}, "
-                f"const {dtype.c_type} b{b_suffix}, "
-                f"{dtype.c_type} out{out_suffix}) {{"
+            signature=emit_function_header(
+                func_name,
+                [
+                    f"const {dtype.c_type} a{a_suffix}",
+                    f"const {dtype.c_type} b{b_suffix}",
+                    f"{dtype.c_type} out{out_suffix}",
+                ],
+                qualifiers="void",
             ),
             batch=None,
             m=m,
@@ -921,12 +945,16 @@ def _write_matmul_kernel(
     a_suffix = _format_array_suffix((batch, m, k))
     b_suffix = _format_array_suffix((batch, k, n))
     out_suffix = _format_array_suffix((batch, m, n))
+    func_name = f"node{node_index}_{op_spec.name}_{dtype.suffix}"
     rendered = matmul_template.render(
-        signature=(
-            f"void node{node_index}_{op_spec.name}_{dtype.suffix}("
-            f"const {dtype.c_type} a{a_suffix}, "
-            f"const {dtype.c_type} b{b_suffix}, "
-            f"{dtype.c_type} out{out_suffix}) {{"
+        signature=emit_function_header(
+            func_name,
+            [
+                f"const {dtype.c_type} a{a_suffix}",
+                f"const {dtype.c_type} b{b_suffix}",
+                f"{dtype.c_type} out{out_suffix}",
+            ],
+            qualifiers="void",
         ),
         batch=batch,
         m=m,
@@ -1357,10 +1385,13 @@ def _write_std_kernel(
     input_rank = len(input_shape)
     output_rank = len(output_shape)
     reduction_set = set(reduction_dims)
-    signature = (
-        f"void node{node_index}_{op_spec.name}_{dtype.suffix}("
-        f"const {dtype.c_type} a{_format_array_suffix(input_shape)}, "
-        f"{dtype.c_type} out{_format_array_suffix(output_shape)}) {{"
+    signature = emit_function_header(
+        f"node{node_index}_{op_spec.name}_{dtype.suffix}",
+        [
+            f"const {dtype.c_type} a{_format_array_suffix(input_shape)}",
+            f"{dtype.c_type} out{_format_array_suffix(output_shape)}",
+        ],
+        qualifiers="void",
     )
     output_access = emit_output_access(
         output_shape, output_strides, c_type=dtype.c_type
@@ -1439,10 +1470,13 @@ def _write_var_kernel(
     input_rank = len(input_shape)
     output_rank = len(output_shape)
     reduction_set = set(reduction_dims)
-    signature = (
-        f"void node{node_index}_{op_spec.name}_{dtype.suffix}("
-        f"const {dtype.c_type} a{_format_array_suffix(input_shape)}, "
-        f"{dtype.c_type} out{_format_array_suffix(output_shape)}) {{"
+    signature = emit_function_header(
+        f"node{node_index}_{op_spec.name}_{dtype.suffix}",
+        [
+            f"const {dtype.c_type} a{_format_array_suffix(input_shape)}",
+            f"{dtype.c_type} out{_format_array_suffix(output_shape)}",
+        ],
+        qualifiers="void",
     )
     output_access = emit_output_access(
         output_shape, output_strides, c_type=dtype.c_type
@@ -1518,10 +1552,13 @@ def _write_norm_kernel(
     input_rank = len(input_shape)
     output_rank = len(output_shape)
     reduction_set = set(reduction_dims)
-    signature = (
-        f"void node{node_index}_{op_spec.name}_{dtype.suffix}("
-        f"const {dtype.c_type} a{_format_array_suffix(input_shape)}, "
-        f"{dtype.c_type} out{_format_array_suffix(output_shape)}) {{"
+    signature = emit_function_header(
+        f"node{node_index}_{op_spec.name}_{dtype.suffix}",
+        [
+            f"const {dtype.c_type} a{_format_array_suffix(input_shape)}",
+            f"{dtype.c_type} out{_format_array_suffix(output_shape)}",
+        ],
+        qualifiers="void",
     )
     output_access = emit_output_access(
         output_shape, output_strides, c_type=dtype.c_type
@@ -1633,10 +1670,13 @@ def _write_reduction_kernel(
     input_rank = len(input_shape)
     output_rank = len(output_shape)
     reduction_set = set(reduction_dims)
-    signature = (
-        f"void node{node_index}_{op_spec.name}_{dtype.suffix}("
-        f"const {dtype.c_type} a{_format_array_suffix(input_shape)}, "
-        f"{dtype.c_type} out{_format_array_suffix(output_shape)}) {{"
+    signature = emit_function_header(
+        f"node{node_index}_{op_spec.name}_{dtype.suffix}",
+        [
+            f"const {dtype.c_type} a{_format_array_suffix(input_shape)}",
+            f"{dtype.c_type} out{_format_array_suffix(output_shape)}",
+        ],
+        qualifiers="void",
     )
     output_access = emit_output_access(
         output_shape, output_strides, c_type=dtype.c_type
@@ -1740,10 +1780,13 @@ def _write_argminmax_kernel(
     dtype: _CodegenDType,
 ) -> List[str]:
     input_c_type = _input_c_type(dtype.torch_dtype, dtype)
-    signature = (
-        f"void node{node_index}_{op_spec.name}_{dtype.suffix}("
-        f"const {input_c_type} a{_format_array_suffix(input_shape)}, "
-        f"int64_t out{_format_array_suffix(output_shape)}) {{"
+    signature = emit_function_header(
+        f"node{node_index}_{op_spec.name}_{dtype.suffix}",
+        [
+            f"const {input_c_type} a{_format_array_suffix(input_shape)}",
+            f"int64_t out{_format_array_suffix(output_shape)}",
+        ],
+        qualifiers="void",
     )
     lines = [signature]
     loop_lines, indent = emit_loops(output_shape)
@@ -1867,10 +1910,10 @@ def _write_concat_kernel(
         suffix = _format_array_suffix(shape)
         input_args.append(f"const {dtype.c_type} a{idx}{suffix}")
     out_suffix = _format_array_suffix(output_shape)
-    signature = (
-        f"void node{node_index}_{op_spec.name}_{dtype.suffix}("
-        f"{', '.join(input_args)}, "
-        f"{dtype.c_type} out{out_suffix}) {{"
+    signature = emit_function_header(
+        f"node{node_index}_{op_spec.name}_{dtype.suffix}",
+        [*input_args, f"{dtype.c_type} out{out_suffix}"],
+        qualifiers="void",
     )
     lines = [signature]
     output_is_contiguous = _is_contiguous(output_shape, output_strides)
@@ -1927,11 +1970,14 @@ def _write_embedding_kernel(
     indices_suffix = _format_array_suffix(indices_shape)
     out_suffix = _format_array_suffix(output_shape)
     index_c_type = _dtype_to_c_type(indices_dtype, dtype)
-    signature = (
-        f"void node{node_index}_{op_spec.name}_{dtype.suffix}("
-        f"const {dtype.c_type} weight{weight_suffix}, "
-        f"const {index_c_type} indices{indices_suffix}, "
-        f"{dtype.c_type} out{out_suffix}) {{"
+    signature = emit_function_header(
+        f"node{node_index}_{op_spec.name}_{dtype.suffix}",
+        [
+            f"const {dtype.c_type} weight{weight_suffix}",
+            f"const {index_c_type} indices{indices_suffix}",
+            f"{dtype.c_type} out{out_suffix}",
+        ],
+        qualifiers="void",
     )
     loop_lines, indent = emit_loops(output_shape)
     indices_rank = len(indices_shape)
@@ -2013,12 +2059,15 @@ def _write_embedding_bag_kernel(
     out_suffix = _format_array_suffix(output_shape)
     index_c_type = _dtype_to_c_type(indices_dtype, dtype)
     offsets_c_type = _dtype_to_c_type(offsets_dtype, dtype)
-    signature = (
-        f"void node{node_index}_{op_spec.name}_{dtype.suffix}("
-        f"const {dtype.c_type} weight{weight_suffix}, "
-        f"const {index_c_type} indices{indices_suffix}, "
-        f"const {offsets_c_type} offsets{offsets_suffix}, "
-        f"{dtype.c_type} out{out_suffix}) {{"
+    signature = emit_function_header(
+        f"node{node_index}_{op_spec.name}_{dtype.suffix}",
+        [
+            f"const {dtype.c_type} weight{weight_suffix}",
+            f"const {index_c_type} indices{indices_suffix}",
+            f"const {offsets_c_type} offsets{offsets_suffix}",
+            f"{dtype.c_type} out{out_suffix}",
+        ],
+        qualifiers="void",
     )
     loop_lines, indent = emit_loops(output_shape)
     output_indices = [f"i{dim}" for dim in range(len(output_shape))]
@@ -2142,11 +2191,14 @@ def _write_gather_kernel(
     index_suffix = _format_array_suffix(index_shape)
     out_suffix = _format_array_suffix(output_shape)
     index_c_type = _dtype_to_c_type(index_dtype, dtype)
-    signature = (
-        f"void node{node_index}_{op_spec.name}_{dtype.suffix}("
-        f"const {dtype.c_type} input{input_suffix}, "
-        f"const {index_c_type} index{index_suffix}, "
-        f"{dtype.c_type} out{out_suffix}) {{"
+    signature = emit_function_header(
+        f"node{node_index}_{op_spec.name}_{dtype.suffix}",
+        [
+            f"const {dtype.c_type} input{input_suffix}",
+            f"const {index_c_type} index{index_suffix}",
+            f"{dtype.c_type} out{out_suffix}",
+        ],
+        qualifiers="void",
     )
     loop_lines, indent = emit_loops(output_shape)
     output_indices = [f"i{dim}" for dim in range(len(output_shape))]
@@ -2234,15 +2286,17 @@ def _write_conv2d_kernel(
     input_suffix = _format_array_suffix(input_shape)
     weight_suffix = _format_array_suffix(weight_shape)
     output_suffix = _format_array_suffix(output_shape)
-    bias_arg = (
-        f"const {dtype.c_type} bias[{out_channels}], " if has_bias else ""
-    )
-    signature = (
-        f"void node{node_index}_{op_spec.name}_{dtype.suffix}("
-        f"const {dtype.c_type} input{input_suffix}, "
-        f"const {dtype.c_type} weight{weight_suffix}, "
-        f"{bias_arg}"
-        f"{dtype.c_type} out{output_suffix}) {{"
+    signature_args = [
+        f"const {dtype.c_type} input{input_suffix}",
+        f"const {dtype.c_type} weight{weight_suffix}",
+    ]
+    if has_bias:
+        signature_args.append(f"const {dtype.c_type} bias[{out_channels}]")
+    signature_args.append(f"{dtype.c_type} out{output_suffix}")
+    signature = emit_function_header(
+        f"node{node_index}_{op_spec.name}_{dtype.suffix}",
+        signature_args,
+        qualifiers="void",
     )
     rendered = conv2d_template.render(
         signature=signature,
@@ -2292,10 +2346,13 @@ def _write_pool2d_kernel(
     dil_h, dil_w = dilation
     input_suffix = _format_array_suffix(input_shape)
     output_suffix = _format_array_suffix(output_shape)
-    signature = (
-        f"void node{node_index}_{op_spec.name}_{dtype.suffix}("
-        f"const {dtype.c_type} input{input_suffix}, "
-        f"{dtype.c_type} out{output_suffix}) {{"
+    signature = emit_function_header(
+        f"node{node_index}_{op_spec.name}_{dtype.suffix}",
+        [
+            f"const {dtype.c_type} input{input_suffix}",
+            f"{dtype.c_type} out{output_suffix}",
+        ],
+        qualifiers="void",
     )
     rendered = pool2d_template.render(
         signature=signature,
@@ -2346,10 +2403,13 @@ def _write_pool3d_kernel(
     dil_d, dil_h, dil_w = dilation
     input_suffix = _format_array_suffix(input_shape)
     output_suffix = _format_array_suffix(output_shape)
-    signature = (
-        f"void node{node_index}_{op_spec.name}_{dtype.suffix}("
-        f"const {dtype.c_type} input{input_suffix}, "
-        f"{dtype.c_type} out{output_suffix}) {{"
+    signature = emit_function_header(
+        f"node{node_index}_{op_spec.name}_{dtype.suffix}",
+        [
+            f"const {dtype.c_type} input{input_suffix}",
+            f"{dtype.c_type} out{output_suffix}",
+        ],
+        qualifiers="void",
     )
     rendered = pool3d_template.render(
         signature=signature,
@@ -2403,11 +2463,14 @@ def _write_adaptive_avg_pool2d_backward_kernel(
     grad_output_suffix = _format_array_suffix(grad_output_shape)
     input_suffix = _format_array_suffix(input_shape)
     output_suffix = _format_array_suffix(output_shape)
-    signature = (
-        f"void node{node_index}_{op_spec.name}_{dtype.suffix}("
-        f"const {dtype.c_type} grad_output{grad_output_suffix}, "
-        f"const {dtype.c_type} input{input_suffix}, "
-        f"{dtype.c_type} out{output_suffix}) {{"
+    signature = emit_function_header(
+        f"node{node_index}_{op_spec.name}_{dtype.suffix}",
+        [
+            f"const {dtype.c_type} grad_output{grad_output_suffix}",
+            f"const {dtype.c_type} input{input_suffix}",
+            f"{dtype.c_type} out{output_suffix}",
+        ],
+        qualifiers="void",
     )
     rendered = pool2d_template.render(
         signature=signature,
@@ -2445,10 +2508,13 @@ def _write_pool1d_kernel(
     out_l = output_shape[2]
     input_suffix = _format_array_suffix(input_shape)
     output_suffix = _format_array_suffix(output_shape)
-    signature = (
-        f"void node{node_index}_{op_spec.name}_{dtype.suffix}("
-        f"const {dtype.c_type} input{input_suffix}, "
-        f"{dtype.c_type} out{output_suffix}) {{"
+    signature = emit_function_header(
+        f"node{node_index}_{op_spec.name}_{dtype.suffix}",
+        [
+            f"const {dtype.c_type} input{input_suffix}",
+            f"{dtype.c_type} out{output_suffix}",
+        ],
+        qualifiers="void",
     )
     rendered = pool1d_template.render(
         signature=signature,
@@ -2498,10 +2564,13 @@ def _write_col2im_kernel(
     dil_h, dil_w = dilation
     input_suffix = _format_array_suffix(input_shape)
     output_suffix = _format_array_suffix(output_shape)
-    signature = (
-        f"void node{node_index}_{op_spec.name}_{dtype.suffix}("
-        f"const {dtype.c_type} input{input_suffix}, "
-        f"{dtype.c_type} out{output_suffix}) {{"
+    signature = emit_function_header(
+        f"node{node_index}_{op_spec.name}_{dtype.suffix}",
+        [
+            f"const {dtype.c_type} input{input_suffix}",
+            f"{dtype.c_type} out{output_suffix}",
+        ],
+        qualifiers="void",
     )
     rendered = col2im_template.render(
         signature=signature,
@@ -2545,20 +2614,20 @@ def _write_batch_norm_kernel(
         inner_size *= dim
     input_suffix = _format_array_suffix(input_shape)
     output_suffix = _format_array_suffix(output_shape)
-    weight_arg = (
-        f"const {dtype.c_type} weight[{channels}], " if has_weight else ""
-    )
-    bias_arg = (
-        f"const {dtype.c_type} bias[{channels}], " if has_bias else ""
-    )
-    signature = (
-        f"void node{node_index}_{op_spec.name}_{dtype.suffix}("
-        f"const {dtype.c_type} input{input_suffix}, "
-        f"const {dtype.c_type} running_mean[{channels}], "
-        f"const {dtype.c_type} running_var[{channels}], "
-        f"{weight_arg}"
-        f"{bias_arg}"
-        f"{dtype.c_type} out{output_suffix}) {{"
+    signature_args = [
+        f"const {dtype.c_type} input{input_suffix}",
+        f"const {dtype.c_type} running_mean[{channels}]",
+        f"const {dtype.c_type} running_var[{channels}]",
+    ]
+    if has_weight:
+        signature_args.append(f"const {dtype.c_type} weight[{channels}]")
+    if has_bias:
+        signature_args.append(f"const {dtype.c_type} bias[{channels}]")
+    signature_args.append(f"{dtype.c_type} out{output_suffix}")
+    signature = emit_function_header(
+        f"node{node_index}_{op_spec.name}_{dtype.suffix}",
+        signature_args,
+        qualifiers="void",
     )
     rendered = batch_norm_template.render(
         signature=signature,
@@ -2586,10 +2655,13 @@ def _write_pdist_kernel(
     n, m = input_shape
     input_suffix = _format_array_suffix(input_shape)
     output_suffix = _format_array_suffix(output_shape)
-    signature = (
-        f"void node{node_index}_{op_spec.name}_{dtype.suffix}("
-        f"const {dtype.c_type} input{input_suffix}, "
-        f"{dtype.c_type} out{output_suffix}) {{"
+    signature = emit_function_header(
+        f"node{node_index}_{op_spec.name}_{dtype.suffix}",
+        [
+            f"const {dtype.c_type} input{input_suffix}",
+            f"{dtype.c_type} out{output_suffix}",
+        ],
+        qualifiers="void",
     )
     rendered = pdist_template.render(
         signature=signature,
@@ -2614,11 +2686,14 @@ def _write_cdist_kernel(
     x1_suffix = _format_array_suffix(x1_shape)
     x2_suffix = _format_array_suffix(x2_shape)
     output_suffix = _format_array_suffix(output_shape)
-    signature = (
-        f"void node{node_index}_{op_spec.name}_{dtype.suffix}("
-        f"const {dtype.c_type} x1{x1_suffix}, "
-        f"const {dtype.c_type} x2{x2_suffix}, "
-        f"{dtype.c_type} out{output_suffix}) {{"
+    signature = emit_function_header(
+        f"node{node_index}_{op_spec.name}_{dtype.suffix}",
+        [
+            f"const {dtype.c_type} x1{x1_suffix}",
+            f"const {dtype.c_type} x2{x2_suffix}",
+            f"{dtype.c_type} out{output_suffix}",
+        ],
+        qualifiers="void",
     )
     rendered = cdist_template.render(
         signature=signature,
@@ -2650,15 +2725,17 @@ def _write_conv1d_kernel(
     input_suffix = _format_array_suffix(input_shape)
     weight_suffix = _format_array_suffix(weight_shape)
     output_suffix = _format_array_suffix(output_shape)
-    bias_arg = (
-        f"const {dtype.c_type} bias[{out_channels}], " if has_bias else ""
-    )
-    signature = (
-        f"void node{node_index}_{op_spec.name}_{dtype.suffix}("
-        f"const {dtype.c_type} input{input_suffix}, "
-        f"const {dtype.c_type} weight{weight_suffix}, "
-        f"{bias_arg}"
-        f"{dtype.c_type} out{output_suffix}) {{"
+    signature_args = [
+        f"const {dtype.c_type} input{input_suffix}",
+        f"const {dtype.c_type} weight{weight_suffix}",
+    ]
+    if has_bias:
+        signature_args.append(f"const {dtype.c_type} bias[{out_channels}]")
+    signature_args.append(f"{dtype.c_type} out{output_suffix}")
+    signature = emit_function_header(
+        f"node{node_index}_{op_spec.name}_{dtype.suffix}",
+        signature_args,
+        qualifiers="void",
     )
     rendered = conv1d_template.render(
         signature=signature,
@@ -2714,21 +2791,22 @@ def _write_generic_source(graph: _GenericGraph) -> str:
             )
         kernel_lines = handler.emit_kernel(index, op_node, graph)
         kernels.append("\n".join(kernel_lines))
-    input_args = ", ".join(
-        [
-            (
-                f"const {_input_c_type(graph.dtypes[node], graph.dtype)} "
-                f"input_{idx}{_format_array_suffix(graph.shapes[node])}"
-            )
-            for idx, node in enumerate(placeholders)
-        ]
-    )
-    input_args = f"{input_args}, " if input_args else ""
+    input_args = [
+        (
+            f"const {_input_c_type(graph.dtypes[node], graph.dtype)} "
+            f"input_{idx}{_format_array_suffix(graph.shapes[node])}"
+        )
+        for idx, node in enumerate(placeholders)
+    ]
     output_dtype = graph.dtypes[graph.output_value]
     output_c_type = _dtype_to_c_type(output_dtype, graph.dtype)
-    signature = (
-        f"void ref_codegen_main_{graph.dtype.suffix}("
-        f"{input_args}{output_c_type} out{_format_array_suffix(graph.shapes[graph.output_value])}) {{"
+    signature = emit_function_header(
+        f"ref_codegen_main_{graph.dtype.suffix}",
+        [
+            *input_args,
+            f"{output_c_type} out{_format_array_suffix(graph.shapes[graph.output_value])}",
+        ],
+        qualifiers="void",
     )
     name_map: Dict[torch.fx.Node, str] = {}
     for idx, placeholder in enumerate(placeholders):
@@ -3648,10 +3726,13 @@ def _write_softmax_kernel(
     rank = len(input_shape)
     input_suffix = _format_array_suffix(input_shape)
     output_suffix = _format_array_suffix(input_shape)
-    signature = (
-        f"void node{node_index}_{op_spec.name}_{dtype.suffix}("
-        f"const {dtype.c_type} input{input_suffix}, "
-        f"{dtype.c_type} out{output_suffix}) {{"
+    signature = emit_function_header(
+        f"node{node_index}_{op_spec.name}_{dtype.suffix}",
+        [
+            f"const {dtype.c_type} input{input_suffix}",
+            f"{dtype.c_type} out{output_suffix}",
+        ],
+        qualifiers="void",
     )
     output_dims = [{"dim": dim, "size": size} for dim, size in enumerate(input_shape)]
     input_contig = _is_contiguous(input_shape, input_strides)
@@ -3715,10 +3796,13 @@ def _write_diagonal_kernel(
     input_suffix = _format_array_suffix(input_shape)
     output_suffix = _format_array_suffix(output_shape)
     input_c_type = _input_c_type(input_dtype, dtype)
-    signature = (
-        f"void node{node_index}_{op_node.spec.name}_{dtype.suffix}("
-        f"const {input_c_type} a{input_suffix}, "
-        f"{dtype.c_type} out{output_suffix}) {{"
+    signature = emit_function_header(
+        f"node{node_index}_{op_node.spec.name}_{dtype.suffix}",
+        [
+            f"const {input_c_type} a{input_suffix}",
+            f"{dtype.c_type} out{output_suffix}",
+        ],
+        qualifiers="void",
     )
     lines = [signature]
     loop_lines, indent = emit_loops(output_shape)
@@ -3758,10 +3842,13 @@ def _write_cumsum_kernel(
         )
     output_c_type = output_dtype_info.c_type
     input_c_type = _input_c_type(graph_dtype.torch_dtype, graph_dtype)
-    signature = (
-        f"void node{node_index}_{op_spec.name}_{graph_dtype.suffix}("
-        f"const {input_c_type} input{_format_array_suffix(input_shape)}, "
-        f"{output_c_type} out{_format_array_suffix(input_shape)}) {{"
+    signature = emit_function_header(
+        f"node{node_index}_{op_spec.name}_{graph_dtype.suffix}",
+        [
+            f"const {input_c_type} input{_format_array_suffix(input_shape)}",
+            f"{output_c_type} out{_format_array_suffix(input_shape)}",
+        ],
+        qualifiers="void",
     )
     lines = [signature]
     if not input_shape:
