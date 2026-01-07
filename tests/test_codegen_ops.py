@@ -141,6 +141,75 @@ def _native_batch_norm_legit_sample_filter(sample):
     return isinstance(momentum, numbers.Number) and isinstance(eps, numbers.Number)
 
 
+def _as_strided_sequence(value):
+    if isinstance(value, torch.Size):
+        return tuple(value)
+    if isinstance(value, (tuple, list)):
+        return tuple(value)
+    return None
+
+
+def _as_strided_sample_filter(sample):
+    if not isinstance(sample.input, torch.Tensor):
+        return False
+    if len(sample.args) < 2:
+        return False
+    size = _as_strided_sequence(sample.args[0])
+    stride = _as_strided_sequence(sample.args[1])
+    if size is None or stride is None:
+        return False
+    try:
+        for item in size:
+            if isinstance(item, torch.Tensor):
+                return False
+            operator.index(item)
+        for item in stride:
+            if isinstance(item, torch.Tensor):
+                return False
+            operator.index(item)
+    except TypeError:
+        return False
+    if len(size) != len(stride):
+        return False
+    storage_offset = sample.kwargs.get("storage_offset", 0)
+    if storage_offset is None or isinstance(storage_offset, torch.Tensor):
+        return False
+    try:
+        storage_offset_value = int(operator.index(storage_offset))
+    except TypeError:
+        return False
+    if storage_offset_value < 0:
+        return False
+    return True
+
+
+def _cdist_sample_filter(sample):
+    if not isinstance(sample.input, torch.Tensor):
+        return False
+    if len(sample.args) < 2:
+        return False
+    x2 = sample.args[0]
+    if not isinstance(x2, torch.Tensor):
+        return False
+    p_value = sample.args[1]
+    compute_mode = sample.args[2] if len(sample.args) > 2 else None
+    try:
+        p_value = float(p_value)
+    except (TypeError, ValueError):
+        return False
+    if p_value != 2.0:
+        return False
+    if compute_mode not in (None, 0):
+        return False
+    if sample.input.ndim != 2 or x2.ndim != 2:
+        return False
+    if sample.input.shape[1] != x2.shape[1]:
+        return False
+    if not sample.input.is_contiguous() or not x2.is_contiguous():
+        return False
+    return True
+
+
 def _sample_matches_constraints(sample, dtype, constraints):
     tensors = _extract_tensors(sample)
     if not tensors:
@@ -735,7 +804,10 @@ CODEGEN_OP_TEST_CONFIG = {
         "allowed_dtypes": (torch.float32, torch.int8, torch.int32),
         "allow_no_tensor_inputs": True,
     },
-    torch.ops.aten.as_strided.default: {},
+    torch.ops.aten.as_strided.default: {
+        "allow_non_tensor_args": False,
+        "sample_filter": _as_strided_sample_filter,
+    },
     torch.ops.aten.argmax.default: {
         "allowed_dtypes": (torch.float32, torch.int8, torch.int32),
     },
@@ -914,6 +986,7 @@ def _normalize_dim_argument(dim: object) -> object:
 
 
 def _compile_codegen_op(aten_overload):
+    compile_at_end = True
     if aten_overload in {
         torch.ops.aten.amax.default,
         torch.ops.aten.amin.default,
@@ -938,11 +1011,48 @@ def _compile_codegen_op(aten_overload):
             if "dim" in kwargs:
                 raise TypeError("cat got multiple values for argument 'dim'")
             return aten_overload(tensors, dim, **kwargs)
+    elif aten_overload is torch.ops.aten.as_strided.default:
+        compile_at_end = False
+        cache = {}
+
+        def compiled_fn(*args: torch.Tensor, **kwargs) -> torch.Tensor:
+            size = kwargs.get("size", args[1] if len(args) > 1 else None)
+            stride = kwargs.get("stride", args[2] if len(args) > 2 else None)
+            storage_offset = kwargs.get(
+                "storage_offset", args[3] if len(args) > 3 else 0
+            )
+            if size is None or stride is None:
+                return aten_overload(*args, **kwargs)
+            size_tuple = _as_strided_sequence(size)
+            stride_tuple = _as_strided_sequence(stride)
+            if size_tuple is None or stride_tuple is None:
+                return aten_overload(*args, **kwargs)
+            size_tuple = tuple(int(operator.index(item)) for item in size_tuple)
+            stride_tuple = tuple(int(operator.index(item)) for item in stride_tuple)
+            storage_offset_value = int(operator.index(storage_offset))
+            key = (size_tuple, stride_tuple, storage_offset_value)
+            compiled_inner = cache.get(key)
+            if compiled_inner is None:
+                def inner(input_tensor: torch.Tensor) -> torch.Tensor:
+                    return aten_overload(
+                        input_tensor,
+                        size_tuple,
+                        stride_tuple,
+                        storage_offset_value,
+                    )
+
+                compiled_inner = torch.compile(
+                    inner, backend=codegen_generic_backend
+                )
+                cache[key] = compiled_inner
+            return compiled_inner(args[0])
     else:
         def compiled_fn(*args: torch.Tensor, **kwargs) -> torch.Tensor:
             return aten_overload(*args, **kwargs)
 
-    return torch.compile(compiled_fn, backend=codegen_generic_backend)
+    if compile_at_end:
+        return torch.compile(compiled_fn, backend=codegen_generic_backend)
+    return compiled_fn
 
 
 def _reference_for_dtype(

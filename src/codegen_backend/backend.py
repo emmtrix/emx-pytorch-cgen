@@ -4242,11 +4242,12 @@ def _write_cumsum_kernel(
         raise RefBackendError(
             "codegen cumsum supports only torch.float32, torch.int8, or torch.int32"
         )
+    output_c_type = output_dtype_info.c_type
     input_c_type = _input_c_type(graph_dtype.torch_dtype, graph_dtype)
     signature = (
         f"void node{node_index}_{op_spec.name}_{graph_dtype.suffix}("
         f"const {input_c_type} input{_format_array_suffix(input_shape)}, "
-        f"{output_dtype_info.c_type} out{_format_array_suffix(input_shape)}) {{"
+        f"{output_c_type} out{_format_array_suffix(input_shape)}) {{"
     )
     lines = [signature]
     if not input_shape:
