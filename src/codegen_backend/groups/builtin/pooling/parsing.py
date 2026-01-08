@@ -325,6 +325,48 @@ def parse_max_pool2d_args(
     return input_arg, kernel_size, stride, padding, dilation, ceil_mode
 
 
+def parse_max_pool2d_with_indices_backward_args(
+    node: torch.fx.Node,
+) -> Tuple[
+    torch.fx.Node,
+    torch.fx.Node,
+    object,
+    object,
+    object,
+    object,
+    object,
+    torch.fx.Node,
+]:
+    args = list(node.args)
+    kwargs = dict(node.kwargs)
+    if len(args) != 8:
+        raise CodegenBackendError(
+            "codegen max_pool2d_with_indices_backward expects grad_output, input, kernel_size, stride, padding, dilation, ceil_mode, and indices"
+        )
+    if kwargs:
+        raise CodegenBackendError(
+            "codegen max_pool2d_with_indices_backward expects no keyword arguments"
+        )
+    grad_output = args[0]
+    input_arg = args[1]
+    kernel_size = args[2]
+    stride = args[3]
+    padding = args[4]
+    dilation = args[5]
+    ceil_mode = args[6]
+    indices = args[7]
+    return (
+        grad_output,
+        input_arg,
+        kernel_size,
+        stride,
+        padding,
+        dilation,
+        ceil_mode,
+        indices,
+    )
+
+
 def parse_avg_pool2d_args(
     node: torch.fx.Node,
 ) -> Tuple[torch.fx.Node, object, object, object, object, object, object, object]:
@@ -487,6 +529,94 @@ def parse_avg_pool3d_args(
     )
 
 
+def parse_max_pool3d_with_indices_args(
+    node: torch.fx.Node,
+) -> Tuple[torch.fx.Node, object, object, object, object, object]:
+    args = list(node.args)
+    kwargs = dict(node.kwargs)
+    if len(args) > 6:
+        raise CodegenBackendError(
+            "codegen max_pool3d_with_indices expects pooling arguments"
+        )
+    input_arg = args[0] if len(args) > 0 else None
+    kernel_size = None
+    stride = None
+    padding = 0
+    dilation = 1
+    ceil_mode = False
+    remaining = args[1:]
+    has_kernel_size = len(remaining) >= 1
+    has_stride = len(remaining) >= 2
+    has_padding = len(remaining) >= 3
+    has_dilation = len(remaining) >= 4
+    has_ceil_mode = len(remaining) >= 5
+    if has_kernel_size:
+        kernel_size = remaining[0]
+    if has_stride:
+        stride = remaining[1]
+    if has_padding:
+        padding = remaining[2]
+    if has_dilation:
+        dilation = remaining[3]
+    if has_ceil_mode:
+        ceil_mode = remaining[4]
+    if kwargs:
+        extra = set(kwargs) - {
+            "self",
+            "kernel_size",
+            "stride",
+            "padding",
+            "dilation",
+            "ceil_mode",
+        }
+        if extra:
+            raise CodegenBackendError(
+                "codegen max_pool3d_with_indices got unexpected kwargs: "
+                f"{sorted(extra)}"
+            )
+        if "self" in kwargs:
+            if input_arg is not None:
+                raise error_kwarg_specified_once(
+                    "max_pool3d_with_indices", "self"
+                )
+            input_arg = kwargs["self"]
+        if "kernel_size" in kwargs:
+            if has_kernel_size:
+                raise error_kwarg_specified_once(
+                    "max_pool3d_with_indices", "kernel_size"
+                )
+            kernel_size = kwargs["kernel_size"]
+        if "stride" in kwargs:
+            if has_stride:
+                raise error_kwarg_specified_once(
+                    "max_pool3d_with_indices", "stride"
+                )
+            stride = kwargs["stride"]
+        if "padding" in kwargs:
+            if has_padding:
+                raise error_kwarg_specified_once(
+                    "max_pool3d_with_indices", "padding"
+                )
+            padding = kwargs["padding"]
+        if "dilation" in kwargs:
+            if has_dilation:
+                raise error_kwarg_specified_once(
+                    "max_pool3d_with_indices", "dilation"
+                )
+            dilation = kwargs["dilation"]
+        if "ceil_mode" in kwargs:
+            if has_ceil_mode:
+                raise error_kwarg_specified_once(
+                    "max_pool3d_with_indices", "ceil_mode"
+                )
+            ceil_mode = kwargs["ceil_mode"]
+    if input_arg is None or kernel_size is None:
+        raise CodegenBackendError(
+            "codegen max_pool3d_with_indices expects pooling arguments"
+        )
+    return input_arg, kernel_size, stride, padding, dilation, ceil_mode
+
+
 __all__ = [
     "parse_adaptive_avg_pool1d_args",
     "parse_adaptive_avg_pool2d_args",
@@ -498,4 +628,6 @@ __all__ = [
     "parse_avg_pool2d_backward_args",
     "parse_max_pool1d_args",
     "parse_max_pool2d_args",
+    "parse_max_pool2d_with_indices_backward_args",
+    "parse_max_pool3d_with_indices_args",
 ]

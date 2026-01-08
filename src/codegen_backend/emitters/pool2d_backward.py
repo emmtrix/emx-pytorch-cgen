@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import List, Sequence, Tuple
 
 from codegen_backend.errors import CodegenBackendError
+from codegen_backend.c_types import _input_c_type
 from codegen_backend.dtypes import _CodegenDType
 from codegen_backend.emitters.base import KindEmitterBase, _format_array_suffix
 from codegen_backend.kinds import KernelEmitRequest
@@ -105,6 +106,46 @@ def _write_avg_pool2d_backward_kernel(
     return rendered.strip().splitlines()
 
 
+def _write_max_pool2d_with_indices_backward_kernel(
+    node_index: int,
+    op_spec: _OpSpec,
+    grad_output_shape: Sequence[int],
+    input_shape: Sequence[int],
+    output_shape: Sequence[int],
+    indices_shape: Sequence[int],
+    grad_dtype: _CodegenDType,
+    indices_dtype: object,
+) -> List[str]:
+    pool2d_template = get_template_env().get_template(
+        "max_pool2d_with_indices_backward_kernel.c.j2"
+    )
+    batch, channels, in_h, in_w = input_shape
+    out_h, out_w = grad_output_shape[2], grad_output_shape[3]
+    grad_output_suffix = _format_array_suffix(grad_output_shape)
+    input_suffix = _format_array_suffix(input_shape)
+    output_suffix = _format_array_suffix(output_shape)
+    indices_suffix = _format_array_suffix(indices_shape)
+    indices_c_type = _input_c_type(indices_dtype, grad_dtype)
+    signature = (
+        f"void node{node_index}_{op_spec.name}_{grad_dtype.suffix}("
+        f"const {grad_dtype.c_type} grad_output{grad_output_suffix}, "
+        f"const {grad_dtype.c_type} input{input_suffix}, "
+        f"const {indices_c_type} indices{indices_suffix}, "
+        f"{grad_dtype.c_type} out{output_suffix}) {{"
+    )
+    rendered = pool2d_template.render(
+        signature=signature,
+        batch=batch,
+        channels=channels,
+        in_h=in_h,
+        in_w=in_w,
+        out_h=out_h,
+        out_w=out_w,
+        c_type=grad_dtype.c_type,
+    )
+    return rendered.strip().splitlines()
+
+
 class Pool2dBackwardEmitter(KindEmitterBase):
     def emit(self, req: KernelEmitRequest) -> List[str]:
         op_spec = req.op_spec
@@ -135,6 +176,17 @@ class Pool2dBackwardEmitter(KindEmitterBase):
                 req.params["count_include_pad"],
                 req.params["divisor_override"],
                 dtype,
+            )
+        if op_spec.name == "max_pool2d_with_indices_backward":
+            return _write_max_pool2d_with_indices_backward_kernel(
+                req.node_index,
+                op_spec,
+                req.input_shapes[0],
+                req.input_shapes[1],
+                req.output_shape,
+                req.input_shapes[2],
+                dtype,
+                req.input_dtypes[2],
             )
         raise CodegenBackendError(
             f"pool2d_backward emitter does not support {op_spec.name}"

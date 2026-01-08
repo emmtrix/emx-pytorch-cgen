@@ -25,8 +25,12 @@ from codegen_backend.emitters.dropout import DropoutEmitter
 from codegen_backend.emitters.empty_strided import EmptyStridedEmitter
 from codegen_backend.emitters.flip import FlipEmitter
 from codegen_backend.emitters.gather import GatherEmitter
+from codegen_backend.emitters.group_norm import GroupNormEmitter
+from codegen_backend.emitters.group_norm_backward import GroupNormBackwardEmitter
 from codegen_backend.emitters.index_put import IndexPutEmitter
 from codegen_backend.emitters.index_select import IndexSelectEmitter
+from codegen_backend.emitters.layer_norm import LayerNormEmitter
+from codegen_backend.emitters.layer_norm_backward import LayerNormBackwardEmitter
 from codegen_backend.emitters.linear import LinearEmitter
 from codegen_backend.emitters.matmul import MatmulEmitter
 from codegen_backend.emitters.masked_scatter import MaskedScatterEmitter
@@ -293,6 +297,23 @@ class EmptyStridedHandler(OpKindHandler):
         size = op_node.p("size", None)
         if size is None:
             raise CodegenBackendError("codegen empty_strided expects a size argument")
+        return tuple(size)
+
+
+class RandomHandler(OpKindHandler):
+    def emit(
+        self, node_index: int, op_node: _OpNode, graph: _GenericGraph
+    ) -> List[str]:
+        return self._emit_standard(node_index, op_node, graph, inputs=())
+
+    def infer_shapes(
+        self,
+        op_node: _OpNode,
+        input_shapes: Sequence[Tuple[int, ...]],
+    ) -> Tuple[int, ...]:
+        size = op_node.p("size", None)
+        if size is None:
+            raise CodegenBackendError("codegen random expects a size argument")
         return tuple(size)
 
 
@@ -620,6 +641,97 @@ class BatchNormHandler(OpKindHandler):
         input_shapes: Sequence[Tuple[int, ...]],
     ) -> Tuple[int, ...]:
         return input_shapes[0]
+
+
+class LayerNormHandler(OpKindHandler):
+    def emit(
+        self, node_index: int, op_node: _OpNode, graph: _GenericGraph
+    ) -> List[str]:
+        return self._emit_standard(
+            node_index,
+            op_node,
+            graph,
+            params={
+                "eps": float(op_node.p("eps", 1e-5)),
+                "has_weight": bool(op_node.p("has_weight", False)),
+                "has_bias": bool(op_node.p("has_bias", False)),
+            },
+        )
+
+    def infer_shapes(
+        self,
+        op_node: _OpNode,
+        input_shapes: Sequence[Tuple[int, ...]],
+    ) -> Tuple[int, ...]:
+        return input_shapes[0]
+
+
+class LayerNormBackwardHandler(OpKindHandler):
+    def emit(
+        self, node_index: int, op_node: _OpNode, graph: _GenericGraph
+    ) -> List[str]:
+        return self._emit_standard(
+            node_index,
+            op_node,
+            graph,
+            params={
+                "has_weight": bool(op_node.p("has_weight", False)),
+                "has_bias": bool(op_node.p("has_bias", False)),
+            },
+        )
+
+    def infer_shapes(
+        self,
+        op_node: _OpNode,
+        input_shapes: Sequence[Tuple[int, ...]],
+    ) -> Tuple[int, ...]:
+        return input_shapes[1]
+
+
+class GroupNormHandler(OpKindHandler):
+    def emit(
+        self, node_index: int, op_node: _OpNode, graph: _GenericGraph
+    ) -> List[str]:
+        return self._emit_standard(
+            node_index,
+            op_node,
+            graph,
+            params={
+                "groups": int(op_node.p("groups", 1)),
+                "eps": float(op_node.p("eps", 1e-5)),
+                "has_weight": bool(op_node.p("has_weight", False)),
+                "has_bias": bool(op_node.p("has_bias", False)),
+            },
+        )
+
+    def infer_shapes(
+        self,
+        op_node: _OpNode,
+        input_shapes: Sequence[Tuple[int, ...]],
+    ) -> Tuple[int, ...]:
+        return input_shapes[0]
+
+
+class GroupNormBackwardHandler(OpKindHandler):
+    def emit(
+        self, node_index: int, op_node: _OpNode, graph: _GenericGraph
+    ) -> List[str]:
+        return self._emit_standard(
+            node_index,
+            op_node,
+            graph,
+            params={
+                "groups": int(op_node.p("groups", 1)),
+                "has_weight": bool(op_node.p("has_weight", False)),
+            },
+        )
+
+    def infer_shapes(
+        self,
+        op_node: _OpNode,
+        input_shapes: Sequence[Tuple[int, ...]],
+    ) -> Tuple[int, ...]:
+        return input_shapes[1]
 
 
 class PdistHandler(OpKindHandler):
@@ -1435,6 +1547,24 @@ class _BackendEmptyStridedHandler(EmptyStridedHandler):
         return OpNodeBuildResult(op_node)
 
 
+class _BackendRandomHandler(RandomHandler):
+    def infer_graph_dtype(
+        self, node: torch.fx.Node, op_spec: _OpSpec
+    ) -> torch.dtype | None:
+        dtype_value = node.kwargs.get("dtype")
+        if isinstance(dtype_value, torch.fx.Node):
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} expects dtype to be a constant"
+            )
+        if dtype_value is None:
+            dtype_value = torch.get_default_dtype()
+        if dtype_value not in (torch.float32, torch.float64):
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} supports only torch.float32 or torch.float64 tensors"
+            )
+        return dtype_value
+
+
 class _BackendScalarTensorHandler(ScalarTensorHandler):
     def infer_graph_dtype(
         self, node: torch.fx.Node, op_spec: _OpSpec
@@ -1563,6 +1693,11 @@ def build_handlers(context: TensorContext) -> Dict[OpKind, OpKindHandler]:
         OpKind.EMPTY_STRIDED: _BackendEmptyStridedHandler(
             context, EmptyStridedEmitter()
         ),
+        OpKind.RANDOM: _BackendRandomHandler(
+            context,
+            EmptyStridedEmitter(),
+            builder=_build_with_dtype(context, "build_random"),
+        ),
         OpKind.SCALAR_TENSOR: _BackendScalarTensorHandler(
             context, ScalarTensorEmitter()
         ),
@@ -1623,6 +1758,26 @@ def build_handlers(context: TensorContext) -> Dict[OpKind, OpKindHandler]:
             context,
             BatchNormEmitter(),
             builder=_build_with_dtype(context, "build_batch_norm"),
+        ),
+        OpKind.LAYER_NORM: LayerNormHandler(
+            context,
+            LayerNormEmitter(),
+            builder=_build_with_dtype(context, "build_native_layer_norm"),
+        ),
+        OpKind.LAYER_NORM_BACKWARD: LayerNormBackwardHandler(
+            context,
+            LayerNormBackwardEmitter(),
+            builder=_build_with_dtype(context, "build_native_layer_norm_backward"),
+        ),
+        OpKind.GROUP_NORM: GroupNormHandler(
+            context,
+            GroupNormEmitter(),
+            builder=_build_with_dtype(context, "build_native_group_norm"),
+        ),
+        OpKind.GROUP_NORM_BACKWARD: GroupNormBackwardHandler(
+            context,
+            GroupNormBackwardEmitter(),
+            builder=_build_with_dtype(context, "build_native_group_norm_backward"),
         ),
         OpKind.PDIST: PdistHandler(
             context,
@@ -1744,8 +1899,26 @@ def build_kind_handler_registrations() -> Dict[OpKind, "KindHandlerRegistration"
         OpKind.EMPTY_STRIDED: KindHandlerRegistration(
             _BackendEmptyStridedHandler, EmptyStridedEmitter
         ),
+        OpKind.RANDOM: KindHandlerRegistration(
+            _BackendRandomHandler, EmptyStridedEmitter
+        ),
         OpKind.SCALAR_TENSOR: KindHandlerRegistration(
             _BackendScalarTensorHandler, ScalarTensorEmitter
+        ),
+        OpKind.BATCH_NORM: KindHandlerRegistration(
+            BatchNormHandler, BatchNormEmitter
+        ),
+        OpKind.LAYER_NORM: KindHandlerRegistration(
+            LayerNormHandler, LayerNormEmitter
+        ),
+        OpKind.LAYER_NORM_BACKWARD: KindHandlerRegistration(
+            LayerNormBackwardHandler, LayerNormBackwardEmitter
+        ),
+        OpKind.GROUP_NORM: KindHandlerRegistration(
+            GroupNormHandler, GroupNormEmitter
+        ),
+        OpKind.GROUP_NORM_BACKWARD: KindHandlerRegistration(
+            GroupNormBackwardHandler, GroupNormBackwardEmitter
         ),
         OpKind.MASKED_SCATTER: KindHandlerRegistration(
             MaskedScatterHandler, MaskedScatterEmitter

@@ -43,6 +43,12 @@ def build_supported_ops() -> dict[str, _OpSpec]:
         torch.ops.aten.avg_pool2d_backward.default,
         torch.ops.aten.avg_pool2d_backward,
     ).build()
+    registry.register_op(
+        "max_pool2d_with_indices_backward", kind=OpKind.POOL2D_BACKWARD
+    ).targets(
+        torch.ops.aten.max_pool2d_with_indices_backward.default,
+        torch.ops.aten.max_pool2d_with_indices_backward,
+    ).build()
     registry.register_op("max_pool1d", kind=OpKind.POOL1D).targets(
         F.max_pool1d,
         torch.ops.aten.max_pool1d.default,
@@ -62,6 +68,12 @@ def build_supported_ops() -> dict[str, _OpSpec]:
         F.max_pool2d,
         torch.ops.aten.max_pool2d.default,
         torch.ops.aten.max_pool2d,
+    ).build()
+    registry.register_op(
+        "max_pool3d_with_indices", kind=OpKind.POOL3D
+    ).targets(
+        torch.ops.aten.max_pool3d_with_indices.default,
+        torch.ops.aten.max_pool3d_with_indices,
     ).build()
 
     return registry.build()

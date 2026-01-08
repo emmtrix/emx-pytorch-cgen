@@ -35,6 +35,8 @@ from codegen_backend.groups.builtin.pooling.parsing import (
     parse_avg_pool2d_backward_args,
     parse_max_pool1d_args,
     parse_max_pool2d_args,
+    parse_max_pool2d_with_indices_backward_args,
+    parse_max_pool3d_with_indices_args,
 )
 
 if TYPE_CHECKING:
@@ -209,16 +211,17 @@ class Pool2dBackwardHandler(OpKindHandler):
     def emit(
         self, node_index: int, op_node: _OpNode, graph: _GenericGraph
     ) -> List[str]:
-        grad_output_node, input_node = op_node.inputs
+        inputs = tuple(op_node.inputs)
         return self._emit_standard(
             node_index,
             op_node,
             graph,
-            inputs=(grad_output_node, input_node),
+            inputs=inputs,
             params={
                 "kernel_size": op_node.p("kernel_size", (1, 1)),
                 "stride": op_node.p("stride", (1, 1)),
                 "padding": op_node.p("padding", (0, 0)),
+                "dilation": op_node.p("dilation", (1, 1)),
                 "ceil_mode": bool(op_node.p("ceil_mode", False)),
                 "count_include_pad": bool(op_node.p("count_include_pad", False)),
                 "divisor_override": op_node.p("divisor_override"),
@@ -230,7 +233,7 @@ class Pool2dBackwardHandler(OpKindHandler):
         op_node: _OpNode,
         input_shapes: Sequence[Tuple[int, ...]],
     ) -> Tuple[int, ...]:
-        _grad_output_shape, input_shape = input_shapes
+        _grad_output_shape, input_shape = input_shapes[:2]
         return input_shape
 
 
@@ -685,6 +688,17 @@ class _BackendPool3dHandler(Pool3dHandler):
             ceil_mode = False
             count_include_pad = False
             divisor_override = None
+        elif op_spec.name == "max_pool3d_with_indices":
+            (
+                input_arg,
+                kernel_size,
+                stride,
+                padding,
+                dilation,
+                ceil_mode,
+            ) = parse_max_pool3d_with_indices_args(node)
+            count_include_pad = False
+            divisor_override = None
         else:
             (
                 input_arg,
@@ -854,6 +868,9 @@ class _BackendPool3dHandler(Pool3dHandler):
                 "stride": stride_triplet,
                 "padding": padding_triplet,
                 "dilation": dilation_triplet,
+                "pool_kind": "max_pool3d"
+                if op_spec.name == "max_pool3d_with_indices"
+                else op_spec.name,
                 "ceil_mode": bool(ceil_mode),
                 "count_include_pad": count_include_pad,
                 "divisor_override": divisor_override,
@@ -894,8 +911,23 @@ class _BackendPool2dBackwardHandler(Pool2dBackwardHandler):
             kernel_size = None
             stride = None
             padding = (0, 0)
+            dilation = (1, 1)
             ceil_mode = False
             count_include_pad = True
+            divisor_override = None
+            indices = None
+        elif op_spec.name == "max_pool2d_with_indices_backward":
+            (
+                grad_output,
+                input_arg,
+                kernel_size,
+                stride,
+                padding,
+                dilation,
+                ceil_mode,
+                indices,
+            ) = parse_max_pool2d_with_indices_backward_args(node)
+            count_include_pad = False
             divisor_override = None
         else:
             (
@@ -908,12 +940,17 @@ class _BackendPool2dBackwardHandler(Pool2dBackwardHandler):
                 count_include_pad,
                 divisor_override,
             ) = parse_avg_pool2d_backward_args(node)
+            dilation = (1, 1)
+            indices = None
         if not isinstance(grad_output, torch.fx.Node) or not isinstance(
             input_arg, torch.fx.Node
         ):
             raise self._ctx.analysis_service.error_expected_tensor(op_spec.name)
         if grad_output not in shapes or input_arg not in shapes:
             raise self._ctx.analysis_service.error_expected_tensor(op_spec.name)
+        if indices is not None:
+            if not isinstance(indices, torch.fx.Node) or indices not in shapes:
+                raise self._ctx.analysis_service.error_expected_tensor(op_spec.name)
         if dtype_info.torch_dtype not in (torch.float32, torch.float64):
             raise CodegenBackendError(
                 f"codegen {op_spec.name} supports only torch.float32 or torch.float64 tensors"
@@ -925,11 +962,20 @@ class _BackendPool2dBackwardHandler(Pool2dBackwardHandler):
             raise CodegenBackendError(
                 f"codegen {op_spec.name} supports only torch.float32 or torch.float64 tensors"
             )
+        if indices is not None and dtypes[indices] is not torch.int64:
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} expects indices to be torch.int64"
+            )
         grad_output_shape = shapes[grad_output]
         input_shape = shapes[input_arg]
+        indices_shape = shapes[indices] if indices is not None else None
         if len(grad_output_shape) != 4 or len(input_shape) != 4:
             raise CodegenBackendError(
                 f"codegen {op_spec.name} requires 4D input tensors"
+            )
+        if indices_shape is not None and indices_shape != grad_output_shape:
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} expects indices to match grad_output shape"
             )
         if not self._is_contiguous(grad_output_shape, strides[grad_output]):
             raise CodegenBackendError(
@@ -938,6 +984,12 @@ class _BackendPool2dBackwardHandler(Pool2dBackwardHandler):
         if not self._is_contiguous(input_shape, strides[input_arg]):
             raise CodegenBackendError(
                 f"codegen {op_spec.name} requires contiguous input tensors"
+            )
+        if indices is not None and not self._is_contiguous(
+            indices_shape, strides[indices]
+        ):
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} requires contiguous indices tensors"
             )
         if (
             grad_output_shape[0] != input_shape[0]
@@ -964,7 +1016,7 @@ class _BackendPool2dBackwardHandler(Pool2dBackwardHandler):
                 )
             stride_pair = kernel_pair
             padding_pair = (0, 0)
-        else:
+        elif indices is None:
             if isinstance(kernel_size, torch.fx.Node):
                 raise CodegenBackendError(
                     "codegen avg_pool2d_backward expects kernel_size to be a list"
@@ -1010,23 +1062,76 @@ class _BackendPool2dBackwardHandler(Pool2dBackwardHandler):
                     raise CodegenBackendError(
                         "codegen avg_pool2d_backward expects divisor_override to be a positive int"
                     )
+        else:
+            if isinstance(kernel_size, torch.fx.Node):
+                raise CodegenBackendError(
+                    "codegen max_pool2d_with_indices_backward expects kernel_size to be a list"
+                )
+            if isinstance(stride, torch.fx.Node):
+                raise CodegenBackendError(
+                    "codegen max_pool2d_with_indices_backward expects stride to be a list"
+                )
+            if isinstance(padding, torch.fx.Node):
+                raise CodegenBackendError(
+                    "codegen max_pool2d_with_indices_backward expects padding to be a list"
+                )
+            if isinstance(dilation, torch.fx.Node):
+                raise CodegenBackendError(
+                    "codegen max_pool2d_with_indices_backward expects dilation to be a list"
+                )
+            kernel_pair = normalize_param(
+                normalize_int_or_pair, "kernel_size", kernel_size
+            )
+            stride_pair = normalize_param(
+                normalize_int_or_pair, "stride", stride
+            )
+            padding_pair = normalize_param(
+                normalize_int_or_pair, "padding", padding
+            )
+            dilation_pair = normalize_param(
+                normalize_int_or_pair, "dilation", dilation
+            )
+            if (
+                kernel_pair[0] <= 0
+                or kernel_pair[1] <= 0
+                or stride_pair[0] <= 0
+                or stride_pair[1] <= 0
+                or dilation_pair[0] <= 0
+                or dilation_pair[1] <= 0
+                or padding_pair[0] < 0
+                or padding_pair[1] < 0
+            ):
+                raise CodegenBackendError(
+                    "codegen max_pool2d_with_indices_backward expects positive kernel, stride, and dilation with non-negative padding"
+                )
+            if not isinstance(ceil_mode, bool):
+                raise CodegenBackendError(
+                    "codegen max_pool2d_with_indices_backward expects ceil_mode to be a bool"
+                )
+            dilation = dilation_pair
         op_node = _OpNode(
             node=node,
             spec=op_spec,
-            inputs=[grad_output, input_arg],
+            inputs=[grad_output, input_arg, indices]
+            if indices is not None
+            else [grad_output, input_arg],
             output_shape=(),
             inplace_input=None,
             params={
                 "kernel_size": kernel_pair,
                 "stride": stride_pair,
                 "padding": padding_pair,
+                "dilation": dilation if indices is not None else (1, 1),
                 "ceil_mode": bool(ceil_mode),
                 "count_include_pad": count_include_pad,
                 "divisor_override": divisor_override,
             },
         )
         output_shape = self._ctx.analysis_service.infer_output_shape(
-            op_node, [grad_output_shape, input_shape]
+            op_node,
+            [grad_output_shape, input_shape]
+            if indices is None
+            else [grad_output_shape, input_shape, indices_shape],
         )
         op_node.output_shape = output_shape
         shapes[node] = output_shape

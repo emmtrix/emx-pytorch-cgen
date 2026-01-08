@@ -326,6 +326,7 @@ CODEGEN_ATEN_OPS = [
     torch.ops.aten.matmul.default,
     torch.ops.aten.max_pool1d.default,
     torch.ops.aten.max_pool2d.default,
+    torch.ops.aten.max_pool3d_with_indices.default,
     torch.ops.aten.maximum.default,
     torch.ops.aten.minimum.default,
     torch.ops.aten.mul.Tensor,
@@ -396,6 +397,8 @@ CODEGEN_ATEN_OPS = [
     torch.ops.aten.div.Tensor_mode,
     torch.ops.aten.div.Scalar_mode,
     torch.ops.aten.empty_strided.default,
+    torch.ops.aten.rand.default,
+    torch.ops.aten.randn.default,
     torch.ops.aten.prod.dim_int,
     torch.ops.aten.as_strided.default,
     torch.ops.aten.squeeze.dim,
@@ -406,9 +409,14 @@ CODEGEN_ATEN_OPS = [
     torch.ops.aten._adaptive_avg_pool2d.default,
     torch.ops.aten._adaptive_avg_pool2d_backward.default,
     torch.ops.aten.avg_pool2d_backward.default,
+    torch.ops.aten.max_pool2d_with_indices_backward.default,
     torch.ops.aten._adaptive_avg_pool3d.default,
     torch.ops.aten._native_batch_norm_legit.default,
     torch.ops.aten._native_batch_norm_legit_no_training.default,
+    torch.ops.aten.native_layer_norm.default,
+    torch.ops.aten.native_layer_norm_backward.default,
+    torch.ops.aten.native_group_norm.default,
+    torch.ops.aten.native_group_norm_backward.default,
     torch.ops.aten.native_dropout.default,
     torch.ops.aten._cdist_forward.default,
     torch.ops.aten._pdist_forward.default,
@@ -711,7 +719,12 @@ CODEGEN_SPECIAL_TEST_OPS = [
     torch.ops.aten._pdist_forward.default,
     torch.ops.aten._embedding_bag.default,
     torch.ops.aten.embedding_dense_backward.default,
+    torch.ops.aten.max_pool3d_with_indices.default,
+    torch.ops.aten.native_group_norm.default,
+    torch.ops.aten.native_group_norm_backward.default,
+    torch.ops.aten.native_layer_norm_backward.default,
     torch.ops.aten.native_dropout.default,
+    torch.ops.aten.rand.default,
 ]
 CODEGEN_OP_TEST_CONFIG = {
     torch.ops.aten.clamp.default: {
@@ -734,6 +747,14 @@ CODEGEN_OP_TEST_CONFIG = {
     },
     torch.ops.aten.scalar_tensor.default: {
         "allow_no_tensor_inputs": True,
+    },
+    torch.ops.aten.rand.default: {
+        "allow_no_tensor_inputs": True,
+        "allowed_dtypes": (torch.float32, torch.float64),
+    },
+    torch.ops.aten.randn.default: {
+        "allow_no_tensor_inputs": True,
+        "allowed_dtypes": (torch.float32, torch.float64),
     },
     torch.ops.aten.avg_pool2d_backward.default: {
         "requires_contiguous": True,
@@ -948,6 +969,11 @@ def _reference_for_dtype(
     kwargs: dict[str, object],
     dtype: torch.dtype,
 ) -> torch.Tensor:
+    if aten_overload in {torch.ops.aten.rand.default, torch.ops.aten.randn.default}:
+        rng_state = torch.get_rng_state()
+        expected = aten_overload(*inputs, **kwargs)
+        torch.set_rng_state(rng_state)
+        return expected
     if dtype not in (torch.int8, torch.uint8, torch.uint32, torch.int32, torch.bool):
         return aten_overload(*inputs, **kwargs)
     try:
@@ -1179,6 +1205,124 @@ class TestCodegenSpecialOps(TestCase):
 
         run(-1)
         run(2)
+
+    def test_codegen_max_pool3d_with_indices(self):
+        input_tensor = torch.randn(1, 2, 4, 4, 4)
+        compiled = torch.compile(
+            lambda inp: torch.ops.aten.max_pool3d_with_indices.default(
+                inp, (2, 2, 2), (2, 2, 2), (0, 0, 0), (1, 1, 1), False
+            ),
+            backend=codegen_generic_backend,
+        )
+        expected = torch.ops.aten.max_pool3d_with_indices.default(
+            input_tensor, (2, 2, 2), (2, 2, 2), (0, 0, 0), (1, 1, 1), False
+        )
+        result = compiled(input_tensor)
+        torch.testing.assert_close(result[0], expected[0])
+        torch.testing.assert_close(result[1], expected[1])
+
+    def test_codegen_native_layer_norm(self):
+        input_tensor = torch.randn(2, 3, 4)
+        weight = torch.randn(4)
+        bias = torch.randn(4)
+        normalized_shape = (4,)
+        eps = 1e-5
+
+        def run(inp, w, b):
+            return torch.ops.aten.native_layer_norm.default(
+                inp, normalized_shape, w, b, eps
+            )
+
+        compiled = torch.compile(run, backend=codegen_generic_backend)
+        expected = run(input_tensor, weight, bias)
+        result = compiled(input_tensor, weight, bias)
+        torch.testing.assert_close(result[0], expected[0])
+        torch.testing.assert_close(result[1], expected[1])
+        torch.testing.assert_close(result[2], expected[2])
+
+    def test_codegen_native_layer_norm_backward(self):
+        input_tensor = torch.randn(2, 3, 4)
+        weight = torch.randn(4)
+        bias = torch.randn(4)
+        normalized_shape = (4,)
+        eps = 1e-5
+        output, mean, rstd = torch.ops.aten.native_layer_norm.default(
+            input_tensor, normalized_shape, weight, bias, eps
+        )
+        grad_output = torch.randn_like(output)
+        output_mask = (True, True, True)
+
+        def run(grad, inp, mean_arg, rstd_arg, w, b):
+            return torch.ops.aten.native_layer_norm_backward.default(
+                grad, inp, normalized_shape, mean_arg, rstd_arg, w, b, output_mask
+            )
+
+        compiled = torch.compile(run, backend=codegen_generic_backend)
+        expected = run(grad_output, input_tensor, mean, rstd, weight, bias)
+        result = compiled(grad_output, input_tensor, mean, rstd, weight, bias)
+        torch.testing.assert_close(result[0], expected[0])
+        torch.testing.assert_close(result[1], expected[1])
+        torch.testing.assert_close(result[2], expected[2])
+
+    def test_codegen_native_group_norm(self):
+        input_tensor = torch.randn(2, 6, 4, 4)
+        weight = torch.randn(6)
+        bias = torch.randn(6)
+        n, c, h, w = input_tensor.shape
+        hxw = h * w
+        groups = 3
+        eps = 1e-5
+
+        def run(inp, w, b):
+            return torch.ops.aten.native_group_norm.default(
+                inp, w, b, n, c, hxw, groups, eps
+            )
+
+        compiled = torch.compile(run, backend=codegen_generic_backend)
+        expected = run(input_tensor, weight, bias)
+        result = compiled(input_tensor, weight, bias)
+        torch.testing.assert_close(result[0], expected[0])
+        torch.testing.assert_close(result[1], expected[1])
+        torch.testing.assert_close(result[2], expected[2])
+
+    def test_codegen_native_group_norm_backward(self):
+        input_tensor = torch.randn(2, 6, 4, 4)
+        weight = torch.randn(6)
+        n, c, h, w = input_tensor.shape
+        hxw = h * w
+        groups = 3
+        eps = 1e-5
+        output, mean, rstd = torch.ops.aten.native_group_norm.default(
+            input_tensor, weight, None, n, c, hxw, groups, eps
+        )
+        grad_output = torch.randn_like(output)
+        output_mask = (True, True, True)
+
+        def run(grad, inp, mean_arg, rstd_arg, w):
+            return torch.ops.aten.native_group_norm_backward.default(
+                grad, inp, mean_arg, rstd_arg, w, n, c, hxw, groups, output_mask
+            )
+
+        compiled = torch.compile(run, backend=codegen_generic_backend)
+        expected = run(grad_output, input_tensor, mean, rstd, weight)
+        result = compiled(grad_output, input_tensor, mean, rstd, weight)
+        torch.testing.assert_close(result[0], expected[0])
+        torch.testing.assert_close(result[1], expected[1])
+        torch.testing.assert_close(result[2], expected[2])
+
+    def test_codegen_rand(self):
+        size = (2, 3)
+        dtype = torch.float32
+
+        def run():
+            return torch.ops.aten.rand.default(size, dtype=dtype)
+
+        compiled = torch.compile(run, backend=codegen_generic_backend)
+        torch.manual_seed(0)
+        expected = run()
+        torch.manual_seed(0)
+        result = compiled()
+        torch.testing.assert_close(result, expected)
 
 
 instantiate_device_type_tests(TestCodegenOpInfo, globals(), only_for="cpu")

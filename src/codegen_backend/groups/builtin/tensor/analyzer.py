@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import operator
+import numbers
 from typing import Dict, Mapping, Tuple
 
 import torch
@@ -241,10 +242,21 @@ class TensorAnalyzer(RegistryGroupAnalyzer):
             torch.ops.aten.min.dim,
             torch.ops.aten.native_dropout,
             torch.ops.aten.native_dropout.default,
+            torch.ops.aten.native_layer_norm,
+            torch.ops.aten.native_layer_norm.default,
+            torch.ops.aten.native_layer_norm_backward,
+            torch.ops.aten.native_layer_norm_backward.default,
+            torch.ops.aten.native_group_norm,
+            torch.ops.aten.native_group_norm.default,
+            torch.ops.aten.native_group_norm_backward,
+            torch.ops.aten.native_group_norm_backward.default,
+            torch.ops.aten.max_pool3d_with_indices,
+            torch.ops.aten.max_pool3d_with_indices.default,
         }:
             raise CodegenBackendError(
                 "codegen backend supports getitem only for _native_batch_norm_legit* "
-                "ops, _embedding_bag, native_dropout, max.dim, or min.dim"
+                "ops, _embedding_bag, native_dropout, native_layer_norm, "
+                "native_group_norm, max_pool3d_with_indices, max.dim, or min.dim"
             )
         if source.target in {torch.ops.aten.max.dim, torch.ops.aten.min.dim}:
             if index in (0, 0.0):
@@ -334,6 +346,125 @@ class TensorAnalyzer(RegistryGroupAnalyzer):
             shapes[node] = shapes[source]
             strides[node] = _contiguous_strides(shapes[source])
             dtypes[node] = torch.bool
+            empty_outputs.add(node)
+            return None
+        if source.target in {
+            torch.ops.aten.max_pool3d_with_indices,
+            torch.ops.aten.max_pool3d_with_indices.default,
+        }:
+            if index not in (1, 1.0):
+                raise CodegenBackendError(
+                    "codegen backend supports max_pool3d_with_indices getitem only for indices 0 or 1"
+                )
+            shapes[node] = shapes[source]
+            strides[node] = _contiguous_strides(shapes[node])
+            dtypes[node] = torch.int64
+            empty_outputs.add(node)
+            return None
+        if source.target in {
+            torch.ops.aten.native_layer_norm,
+            torch.ops.aten.native_layer_norm.default,
+        }:
+            if index not in (1, 1.0, 2, 2.0):
+                raise CodegenBackendError(
+                    "codegen backend supports native_layer_norm getitem only for indices 0, 1, or 2"
+                )
+            normalized_shape = source.args[1] if len(source.args) > 1 else None
+            if isinstance(normalized_shape, torch.fx.Node):
+                raise CodegenBackendError(
+                    "codegen native_layer_norm expects normalized_shape to be a constant"
+                )
+            if isinstance(normalized_shape, torch.Size):
+                normalized_shape = tuple(normalized_shape)
+            if isinstance(normalized_shape, numbers.Integral):
+                normalized_shape_tuple = (int(normalized_shape),)
+            elif isinstance(normalized_shape, (tuple, list)):
+                normalized_shape_tuple = tuple(
+                    int(operator.index(item)) for item in normalized_shape
+                )
+            else:
+                raise CodegenBackendError(
+                    "codegen native_layer_norm expects normalized_shape to be a tuple of ints"
+                )
+            input_shape = shapes[source]
+            mean_shape = input_shape[: -len(normalized_shape_tuple)] + (
+                1,
+            ) * len(normalized_shape_tuple)
+            shapes[node] = mean_shape
+            strides[node] = _contiguous_strides(shapes[node])
+            dtypes[node] = dtypes[source]
+            empty_outputs.add(node)
+            return None
+        if source.target in {
+            torch.ops.aten.native_group_norm,
+            torch.ops.aten.native_group_norm.default,
+        }:
+            if index not in (1, 1.0, 2, 2.0):
+                raise CodegenBackendError(
+                    "codegen backend supports native_group_norm getitem only for indices 0, 1, or 2"
+                )
+            n_value = source.args[3] if len(source.args) > 3 else None
+            group_value = source.args[6] if len(source.args) > 6 else None
+            if isinstance(n_value, torch.fx.Node) or isinstance(
+                group_value, torch.fx.Node
+            ):
+                raise CodegenBackendError(
+                    "codegen native_group_norm expects N and group to be constants"
+                )
+            n_value = int(operator.index(n_value))
+            group_value = int(operator.index(group_value))
+            shapes[node] = (n_value, group_value)
+            strides[node] = _contiguous_strides(shapes[node])
+            dtypes[node] = dtypes[source]
+            empty_outputs.add(node)
+            return None
+        if source.target in {
+            torch.ops.aten.native_layer_norm_backward,
+            torch.ops.aten.native_layer_norm_backward.default,
+        }:
+            if index not in (1, 1.0, 2, 2.0):
+                raise CodegenBackendError(
+                    "codegen backend supports native_layer_norm_backward getitem only for indices 0, 1, or 2"
+                )
+            normalized_shape = source.args[2] if len(source.args) > 2 else None
+            if isinstance(normalized_shape, torch.fx.Node):
+                raise CodegenBackendError(
+                    "codegen native_layer_norm_backward expects normalized_shape to be a constant"
+                )
+            if isinstance(normalized_shape, torch.Size):
+                normalized_shape = tuple(normalized_shape)
+            if isinstance(normalized_shape, numbers.Integral):
+                normalized_shape_tuple = (int(normalized_shape),)
+            elif isinstance(normalized_shape, (tuple, list)):
+                normalized_shape_tuple = tuple(
+                    int(operator.index(item)) for item in normalized_shape
+                )
+            else:
+                raise CodegenBackendError(
+                    "codegen native_layer_norm_backward expects normalized_shape to be a tuple of ints"
+                )
+            shapes[node] = normalized_shape_tuple
+            strides[node] = _contiguous_strides(shapes[node])
+            dtypes[node] = dtypes[source]
+            empty_outputs.add(node)
+            return None
+        if source.target in {
+            torch.ops.aten.native_group_norm_backward,
+            torch.ops.aten.native_group_norm_backward.default,
+        }:
+            if index not in (1, 1.0, 2, 2.0):
+                raise CodegenBackendError(
+                    "codegen backend supports native_group_norm_backward getitem only for indices 0, 1, or 2"
+                )
+            c_value = source.args[6] if len(source.args) > 6 else None
+            if isinstance(c_value, torch.fx.Node):
+                raise CodegenBackendError(
+                    "codegen native_group_norm_backward expects C to be constant"
+                )
+            c_value = int(operator.index(c_value))
+            shapes[node] = (c_value,)
+            strides[node] = _contiguous_strides(shapes[node])
+            dtypes[node] = dtypes[source]
             empty_outputs.add(node)
             return None
         output_shape = (0,)

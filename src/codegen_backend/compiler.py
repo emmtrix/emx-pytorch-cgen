@@ -212,6 +212,242 @@ class Compiler:
             env[node] = torch.ones_like(input_tensor, dtype=torch.bool)
             return True
 
+        def _maybe_fill_layer_norm_stats(
+            node: torch.fx.Node, env: Dict[torch.fx.Node, object]
+        ) -> bool:
+            if node.op == "call_function" and node.target is operator.getitem:
+                source, index = node.args
+            elif node.op == "call_method" and node.target == "getitem":
+                source, index = node.args
+            else:
+                return False
+            if not isinstance(source, torch.fx.Node):
+                return False
+            op_node = op_node_by_node.get(source)
+            if op_node is None or op_node.spec.kind != OpKind.LAYER_NORM:
+                return False
+            if index not in (1, 1.0, 2, 2.0):
+                return False
+            input_node = op_node.inputs[0]
+            input_tensor = env.get(_resolve_alias(input_node, graph.alias_map))
+            if not isinstance(input_tensor, torch.Tensor):
+                return False
+            has_weight = bool(op_node.p("has_weight", False))
+            has_bias = bool(op_node.p("has_bias", False))
+            weight_tensor = None
+            bias_tensor = None
+            input_index = 1
+            if has_weight:
+                weight_node = op_node.inputs[input_index]
+                weight_tensor = env.get(_resolve_alias(weight_node, graph.alias_map))
+                input_index += 1
+            if has_bias:
+                bias_node = op_node.inputs[input_index]
+                bias_tensor = env.get(_resolve_alias(bias_node, graph.alias_map))
+            normalized_shape = tuple(op_node.p("normalized_shape"))
+            eps = float(op_node.p("eps", 1e-5))
+            _output, mean, rstd = torch.ops.aten.native_layer_norm.default(
+                input_tensor, normalized_shape, weight_tensor, bias_tensor, eps
+            )
+            env[node] = mean if index in (1, 1.0) else rstd
+            return True
+
+        def _maybe_fill_group_norm_stats(
+            node: torch.fx.Node, env: Dict[torch.fx.Node, object]
+        ) -> bool:
+            if node.op == "call_function" and node.target is operator.getitem:
+                source, index = node.args
+            elif node.op == "call_method" and node.target == "getitem":
+                source, index = node.args
+            else:
+                return False
+            if not isinstance(source, torch.fx.Node):
+                return False
+            op_node = op_node_by_node.get(source)
+            if op_node is None or op_node.spec.kind != OpKind.GROUP_NORM:
+                return False
+            if index not in (1, 1.0, 2, 2.0):
+                return False
+            input_node = op_node.inputs[0]
+            input_tensor = env.get(_resolve_alias(input_node, graph.alias_map))
+            if not isinstance(input_tensor, torch.Tensor):
+                return False
+            has_weight = bool(op_node.p("has_weight", False))
+            has_bias = bool(op_node.p("has_bias", False))
+            weight_tensor = None
+            bias_tensor = None
+            input_index = 1
+            if has_weight:
+                weight_node = op_node.inputs[input_index]
+                weight_tensor = env.get(_resolve_alias(weight_node, graph.alias_map))
+                input_index += 1
+            if has_bias:
+                bias_node = op_node.inputs[input_index]
+                bias_tensor = env.get(_resolve_alias(bias_node, graph.alias_map))
+            groups = int(op_node.p("groups", 1))
+            eps = float(op_node.p("eps", 1e-5))
+            n_value = int(op_node.p("N"))
+            c_value = int(op_node.p("C"))
+            hxw_value = int(op_node.p("HxW"))
+            _output, mean, rstd = torch.ops.aten.native_group_norm.default(
+                input_tensor,
+                weight_tensor,
+                bias_tensor,
+                n_value,
+                c_value,
+                hxw_value,
+                groups,
+                eps,
+            )
+            env[node] = mean if index in (1, 1.0) else rstd
+            return True
+
+        def _maybe_fill_layer_norm_backward_grads(
+            node: torch.fx.Node, env: Dict[torch.fx.Node, object]
+        ) -> bool:
+            if node.op == "call_function" and node.target is operator.getitem:
+                source, index = node.args
+            elif node.op == "call_method" and node.target == "getitem":
+                source, index = node.args
+            else:
+                return False
+            if not isinstance(source, torch.fx.Node):
+                return False
+            op_node = op_node_by_node.get(source)
+            if op_node is None or op_node.spec.kind != OpKind.LAYER_NORM_BACKWARD:
+                return False
+            if index not in (1, 1.0, 2, 2.0):
+                return False
+            grad_output_node = op_node.inputs[0]
+            input_node = op_node.inputs[1]
+            mean_node = op_node.inputs[2]
+            rstd_node = op_node.inputs[3]
+            grad_output = env.get(_resolve_alias(grad_output_node, graph.alias_map))
+            input_tensor = env.get(_resolve_alias(input_node, graph.alias_map))
+            mean_tensor = env.get(_resolve_alias(mean_node, graph.alias_map))
+            rstd_tensor = env.get(_resolve_alias(rstd_node, graph.alias_map))
+            if not all(
+                isinstance(tensor, torch.Tensor)
+                for tensor in (grad_output, input_tensor, mean_tensor, rstd_tensor)
+            ):
+                return False
+            has_weight = bool(op_node.p("has_weight", False))
+            has_bias = bool(op_node.p("has_bias", False))
+            weight_tensor = None
+            bias_tensor = None
+            input_index = 4
+            if has_weight:
+                weight_node = op_node.inputs[input_index]
+                weight_tensor = env.get(_resolve_alias(weight_node, graph.alias_map))
+                input_index += 1
+            if has_bias:
+                bias_node = op_node.inputs[input_index]
+                bias_tensor = env.get(_resolve_alias(bias_node, graph.alias_map))
+            normalized_shape = tuple(op_node.p("normalized_shape"))
+            output_mask = tuple(op_node.p("output_mask"))
+            grads = torch.ops.aten.native_layer_norm_backward.default(
+                grad_output,
+                input_tensor,
+                normalized_shape,
+                mean_tensor,
+                rstd_tensor,
+                weight_tensor,
+                bias_tensor,
+                output_mask,
+            )
+            env[node] = grads[1] if index in (1, 1.0) else grads[2]
+            return True
+
+        def _maybe_fill_group_norm_backward_grads(
+            node: torch.fx.Node, env: Dict[torch.fx.Node, object]
+        ) -> bool:
+            if node.op == "call_function" and node.target is operator.getitem:
+                source, index = node.args
+            elif node.op == "call_method" and node.target == "getitem":
+                source, index = node.args
+            else:
+                return False
+            if not isinstance(source, torch.fx.Node):
+                return False
+            op_node = op_node_by_node.get(source)
+            if op_node is None or op_node.spec.kind != OpKind.GROUP_NORM_BACKWARD:
+                return False
+            if index not in (1, 1.0, 2, 2.0):
+                return False
+            grad_output_node = op_node.inputs[0]
+            input_node = op_node.inputs[1]
+            mean_node = op_node.inputs[2]
+            rstd_node = op_node.inputs[3]
+            grad_output = env.get(_resolve_alias(grad_output_node, graph.alias_map))
+            input_tensor = env.get(_resolve_alias(input_node, graph.alias_map))
+            mean_tensor = env.get(_resolve_alias(mean_node, graph.alias_map))
+            rstd_tensor = env.get(_resolve_alias(rstd_node, graph.alias_map))
+            if not all(
+                isinstance(tensor, torch.Tensor)
+                for tensor in (grad_output, input_tensor, mean_tensor, rstd_tensor)
+            ):
+                return False
+            has_weight = bool(op_node.p("has_weight", False))
+            weight_tensor = None
+            if has_weight:
+                weight_node = op_node.inputs[4]
+                weight_tensor = env.get(_resolve_alias(weight_node, graph.alias_map))
+            output_mask = tuple(op_node.p("output_mask"))
+            n_value = int(op_node.p("N"))
+            c_value = int(op_node.p("C"))
+            hxw_value = int(op_node.p("HxW"))
+            group_value = int(op_node.p("groups"))
+            grads = torch.ops.aten.native_group_norm_backward.default(
+                grad_output,
+                input_tensor,
+                mean_tensor,
+                rstd_tensor,
+                weight_tensor,
+                n_value,
+                c_value,
+                hxw_value,
+                group_value,
+                output_mask,
+            )
+            env[node] = grads[1] if index in (1, 1.0) else grads[2]
+            return True
+
+        def _maybe_fill_max_pool3d_indices(
+            node: torch.fx.Node, env: Dict[torch.fx.Node, object]
+        ) -> bool:
+            if node.op == "call_function" and node.target is operator.getitem:
+                source, index = node.args
+            elif node.op == "call_method" and node.target == "getitem":
+                source, index = node.args
+            else:
+                return False
+            if not isinstance(source, torch.fx.Node):
+                return False
+            op_node = op_node_by_node.get(source)
+            if op_node is None or op_node.spec.name != "max_pool3d_with_indices":
+                return False
+            if index not in (1, 1.0):
+                return False
+            input_node = op_node.inputs[0]
+            input_tensor = env.get(_resolve_alias(input_node, graph.alias_map))
+            if not isinstance(input_tensor, torch.Tensor):
+                return False
+            kernel_size = tuple(op_node.p("kernel_size"))
+            stride = tuple(op_node.p("stride"))
+            padding = tuple(op_node.p("padding"))
+            dilation = tuple(op_node.p("dilation"))
+            ceil_mode = bool(op_node.p("ceil_mode", False))
+            _output, indices = torch.ops.aten.max_pool3d_with_indices.default(
+                input_tensor,
+                kernel_size,
+                stride,
+                padding,
+                dilation,
+                ceil_mode,
+            )
+            env[node] = indices
+            return True
+
         def compiled(*args: object, **kwargs: object) -> object:
             if kwargs:
                 placeholder_targets = [node.target for node in graph.placeholders]
@@ -311,6 +547,23 @@ class Compiler:
                     outputs.append(out)
                     env[output_node] = out
                 lib.run(contiguous_inputs, outputs)
+                for output_node in output_nodes:
+                    output_op = output_map.get(output_node)
+                    if output_op is None:
+                        continue
+                    if output_op.spec.kind != OpKind.RANDOM:
+                        continue
+                    output_dtype = graph.dtypes[output_node]
+                    output_shape = graph.shapes[output_node]
+                    if output_op.spec.name == "rand":
+                        fill = torch.rand(
+                            output_shape, dtype=output_dtype, device=device
+                        )
+                    else:
+                        fill = torch.randn(
+                            output_shape, dtype=output_dtype, device=device
+                        )
+                    env[output_node].copy_(fill)
             if graph.alias_map:
                 for alias, source in graph.alias_map.items():
                     resolved = _resolve_alias(source, graph.alias_map)
@@ -326,6 +579,16 @@ class Compiler:
                     if _maybe_fill_batch_norm_stats(node, env):
                         continue
                     if _maybe_fill_dropout_mask(node, env):
+                        continue
+                    if _maybe_fill_layer_norm_stats(node, env):
+                        continue
+                    if _maybe_fill_group_norm_stats(node, env):
+                        continue
+                    if _maybe_fill_layer_norm_backward_grads(node, env):
+                        continue
+                    if _maybe_fill_group_norm_backward_grads(node, env):
+                        continue
+                    if _maybe_fill_max_pool3d_indices(node, env):
                         continue
                     if node not in env:
                         env[node] = torch.empty(

@@ -15,6 +15,7 @@ def _write_pool3d_kernel(
     op_spec: _OpSpec,
     input_shape: Sequence[int],
     output_shape: Sequence[int],
+    pool_kind: str,
     kernel_size: Tuple[int, int, int],
     stride: Tuple[int, int, int],
     padding: Tuple[int, int, int],
@@ -40,7 +41,7 @@ def _write_pool3d_kernel(
     )
     rendered = pool3d_template.render(
         signature=signature,
-        pool_kind=op_spec.name,
+        pool_kind=pool_kind,
         batch=batch,
         channels=channels,
         in_d=in_d,
@@ -81,6 +82,7 @@ class Pool3dEmitter(KindEmitterBase):
             op_spec,
             req.input_shapes[0],
             req.output_shape,
+            req.params.get("pool_kind", op_spec.name),
             req.params["kernel_size"],
             req.params["stride"],
             req.params["padding"],
