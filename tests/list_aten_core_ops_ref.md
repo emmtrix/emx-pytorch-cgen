@@ -42,7 +42,7 @@
 | `avg_pool1d` | ✅ |
 | `avg_pool2d` | ✅ |
 | `avg_pool2d_backward` | ✅ |
-| `avg_pool3d` | — |
+| `avg_pool3d` | ✅ |
 | `bitwise_and.Scalar` | ✅ |
 | `bitwise_and.Tensor` | ✅ |
 | `bitwise_not` | ✅ |
@@ -197,5 +197,5 @@
 
 ## Summary
 - total core aten ops: 192
-- supported by codegen: 146 / 192 (76.0%)
-- unsupported by codegen: 46
+- supported by codegen: 147 / 192 (76.6%)
+- unsupported by codegen: 45
