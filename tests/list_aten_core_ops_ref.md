@@ -8,7 +8,7 @@
 | `_cdist_forward` | ✅ |
 | `_embedding_bag` | ✅ |
 | `_fft_r2c` | — |
-| `_local_scalar_dense` | — |
+| `_local_scalar_dense` | ✅ |
 | `_log_softmax` | ✅ |
 | `_native_batch_norm_legit` | ✅ |
 | `_native_batch_norm_legit.no_stats` | — |

@@ -275,7 +275,7 @@
 | `_linalg_solve_ex` | — |
 | `_linalg_svd` | — |
 | `_list_to_tensor` | — |
-| `_local_scalar_dense` | — |
+| `_local_scalar_dense` | ✅ |
 | `_log_softmax` | ✅ |
 | `_log_softmax_backward_data` | — |
 | `_logcumsumexp` | — |
