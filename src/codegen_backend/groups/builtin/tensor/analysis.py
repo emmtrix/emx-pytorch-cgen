@@ -17,6 +17,7 @@ from codegen_backend.analysis_helpers import (
     normalize_as_strided_sequence,
     normalize_flip_dims,
     parse_constant_int,
+    resolve_scalar_arg,
 )
 from codegen_backend.c_types import _normalize_scalar_value
 from codegen_backend.dtypes import (
@@ -37,6 +38,7 @@ from codegen_backend.groups.builtin.tensor.parsing import (
     parse_index_select_args,
     parse_linear_args,
     parse_masked_scatter_args,
+    parse_select_scatter_args,
     parse_resize_size,
 )
 from codegen_backend.graph import _OpNode
@@ -445,6 +447,51 @@ class TensorOpBuilder:
         )
         return self._finalize_node(
             node, op_node, dtype_info, [x1_shape, x2_shape]
+        )
+
+    def build_native_dropout(
+        self, node: torch.fx.Node, op_spec: _OpSpec, dtype_info: _CodegenDType
+    ) -> _OpNode:
+        if len(node.args) < 3:
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} expects three inputs"
+            )
+        if node.kwargs:
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} expects positional args only"
+            )
+        input_arg, p_arg, train_arg = node.args[:3]
+        if not isinstance(input_arg, torch.fx.Node) or input_arg not in self._shapes:
+            raise error_expected_tensor(op_spec.name)
+        if self._dtypes[input_arg] is not dtype_info.torch_dtype:
+            raise CodegenBackendError(
+                "codegen native_dropout expects inputs to share the graph dtype"
+            )
+        if dtype_info.torch_dtype is not torch.float32:
+            raise CodegenBackendError(
+                "codegen native_dropout supports only float32 tensors"
+            )
+        p_value = float(resolve_scalar_arg(op_spec.name, p_arg, self._scalar_values))
+        train_value = bool(
+            resolve_scalar_arg(op_spec.name, train_arg, self._scalar_values)
+        )
+        if p_value < 0.0 or p_value > 1.0:
+            raise CodegenBackendError(
+                "codegen native_dropout expects p to be within [0, 1]"
+            )
+        if train_value and p_value != 0.0:
+            raise CodegenBackendError(
+                "codegen native_dropout supports train=False or p=0.0"
+            )
+        op_node = _OpNode(
+            node=node,
+            spec=op_spec,
+            inputs=[input_arg],
+            output_shape=(),
+            params={"p": p_value, "train": train_value},
+        )
+        return self._finalize_node(
+            node, op_node, dtype_info, [self._shapes[input_arg]]
         )
 
     def build_addmm_like(
@@ -905,6 +952,121 @@ class TensorOpBuilder:
         )
         return self._finalize_node(
             node, op_node, dtype_info, [input_shape, index_shape]
+        )
+
+    def build_select_scatter(
+        self,
+        node: torch.fx.Node,
+        op_spec: _OpSpec,
+        dtype_info: _CodegenDType,
+        inplace_input: int | None = None,
+    ) -> _OpNode:
+        input_arg, src, dim, index = parse_select_scatter_args(node)
+        if not isinstance(input_arg, torch.fx.Node) or input_arg not in self._shapes:
+            raise error_expected_tensor(op_spec.name)
+        if not isinstance(src, torch.fx.Node) or src not in self._shapes:
+            raise error_expected_tensor(op_spec.name)
+        if self._dtypes[input_arg] is not dtype_info.torch_dtype:
+            raise CodegenBackendError(
+                "codegen select_scatter expects input to match the graph dtype"
+            )
+        if self._dtypes[src] is not dtype_info.torch_dtype:
+            raise CodegenBackendError(
+                "codegen select_scatter expects src to match the graph dtype"
+            )
+        input_shape = self._shapes[input_arg]
+        if not input_shape:
+            raise CodegenBackendError(
+                "codegen select_scatter expects input to have at least 1 dimension"
+            )
+        dim_value = parse_constant_int(op_spec.name, "dim", dim)
+        if dim_value < 0:
+            dim_value += len(input_shape)
+        if dim_value < 0 or dim_value >= len(input_shape):
+            raise CodegenBackendError("codegen select_scatter dim is out of range")
+        index_value = parse_constant_int(op_spec.name, "index", index)
+        if index_value < 0:
+            index_value += input_shape[dim_value]
+        if index_value < 0 or index_value >= input_shape[dim_value]:
+            raise CodegenBackendError(
+                "codegen select_scatter index is out of range"
+            )
+        src_shape = self._shapes[src]
+        expected_src_shape = tuple(
+            size
+            for dim_index, size in enumerate(input_shape)
+            if dim_index != dim_value
+        )
+        if src_shape != expected_src_shape:
+            raise CodegenBackendError(
+                "codegen select_scatter expects src to match input shape without dim"
+    def build_repeat(
+        self, node: torch.fx.Node, op_spec: _OpSpec, dtype_info: _CodegenDType
+    ) -> _OpNode:
+        if not node.args:
+            raise CodegenBackendError(f"codegen {op_spec.name} expects one input")
+        input_arg = node.args[0]
+        if not isinstance(input_arg, torch.fx.Node) or input_arg not in self._shapes:
+            raise error_expected_tensor(op_spec.name)
+        if self._dtypes[input_arg] is not dtype_info.torch_dtype:
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} expects inputs to share the graph dtype"
+            )
+        repeats_arg = None
+        if len(node.args) > 1:
+            if len(node.args) == 2:
+                repeats_arg = node.args[1]
+            else:
+                repeats_arg = node.args[1:]
+        if node.kwargs:
+            if "repeats" in node.kwargs:
+                if repeats_arg is not None and len(node.args) > 1:
+                    raise error_kwarg_specified_once(op_spec.name, "repeats")
+                repeats_arg = node.kwargs["repeats"]
+            extra = set(node.kwargs) - {"repeats"}
+            if extra:
+                raise CodegenBackendError(
+                    f"codegen {op_spec.name} got unexpected kwargs: {sorted(extra)}"
+                )
+        if repeats_arg is None:
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} expects repeats arguments"
+            )
+        repeats = normalize_as_strided_sequence(
+            op_spec.name,
+            repeats_arg,
+            "repeats",
+            scalar_values=self._scalar_values,
+        )
+        input_shape = self._shapes[input_arg]
+        if len(repeats) < len(input_shape):
+            raise CodegenBackendError(
+                "codegen repeat expects repeats to cover the input rank"
+            )
+        if any(repeat < 0 for repeat in repeats):
+            raise CodegenBackendError(
+                "codegen repeat expects repeats to be non-negative"
+            )
+        op_node = _OpNode(
+            node=node,
+            spec=op_spec,
+            inputs=[input_arg, src],
+            output_shape=(),
+            inplace_input=inplace_input,
+            params={"dim": dim_value, "index": index_value},
+        )
+        return self._finalize_node(
+            node,
+            op_node,
+            dtype_info,
+            [input_shape, src_shape],
+            inplace_input=inplace_input,
+            inputs=[input_arg],
+            output_shape=(),
+            params={"repeats": repeats},
+        )
+        return self._finalize_node(
+            node, op_node, dtype_info, [input_shape]
         )
 
     def build_view(

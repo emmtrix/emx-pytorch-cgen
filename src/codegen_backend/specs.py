@@ -14,6 +14,7 @@ class OpKind(str, Enum):
     FLIP = "flip"
     ARG_REDUCTION = "arg_reduction"
     REDUCTION = "reduction"
+    REPEAT = "repeat"
     ARANGE = "arange"
     SOFTMAX = "softmax"
     CUMSUM = "cumsum"
@@ -46,6 +47,10 @@ class OpKind(str, Enum):
     RESIZE = "resize"
     COL2IM = "col2im"
     MASKED_SCATTER = "masked_scatter"
+    SELECT_SCATTER = "select_scatter"
+    SPLIT_WITH_SIZES = "split_with_sizes"
+    NONZERO = "nonzero"
+    DROPOUT = "dropout"
 
 
 @dataclass(frozen=True)

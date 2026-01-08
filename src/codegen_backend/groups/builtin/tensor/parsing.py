@@ -166,6 +166,47 @@ def parse_index_select_args(
     return input_arg, dim, index
 
 
+def parse_select_scatter_args(
+    node: torch.fx.Node,
+) -> Tuple[object, object, object, object]:
+    if len(node.args) > 4:
+        raise CodegenBackendError(
+            "codegen select_scatter expects at most four inputs"
+        )
+    if not node.args:
+        raise CodegenBackendError(
+            "codegen select_scatter expects input, src, dim, and index"
+        )
+    input_arg = node.args[0]
+    src = node.args[1] if len(node.args) > 1 else None
+    dim = node.args[2] if len(node.args) > 2 else None
+    index = node.args[3] if len(node.args) > 3 else None
+    if node.kwargs:
+        if "src" in node.kwargs:
+            if src is not None:
+                raise error_kwarg_specified_once("select_scatter", "src")
+            src = node.kwargs["src"]
+        if "dim" in node.kwargs:
+            if dim is not None:
+                raise error_kwarg_specified_once("select_scatter", "dim")
+            dim = node.kwargs["dim"]
+        if "index" in node.kwargs:
+            if index is not None:
+                raise error_kwarg_specified_once("select_scatter", "index")
+            index = node.kwargs["index"]
+        extra = set(node.kwargs) - {"src", "dim", "index"}
+        if extra:
+            raise CodegenBackendError(
+                "codegen select_scatter got unexpected kwargs: "
+                f"{sorted(extra)}"
+            )
+    if src is None or dim is None or index is None:
+        raise CodegenBackendError(
+            "codegen select_scatter expects src, dim, and index arguments"
+        )
+    return input_arg, src, dim, index
+
+
 def parse_addmm_like_scalar(
     op_name: str, name: str, value: object | None
 ) -> float:
@@ -285,6 +326,68 @@ def parse_concat_args(
         if not isinstance(item, torch.fx.Node):
             raise error_expected_tensor("cat")
     return list(tensors_arg), dim_value
+
+
+def parse_split_with_sizes_args(
+    node: torch.fx.Node,
+) -> Tuple[torch.fx.Node, Tuple[int, ...], int]:
+    if len(node.args) < 2:
+        raise CodegenBackendError(
+            "codegen split_with_sizes expects input and split sizes"
+        )
+    if len(node.args) > 3:
+        raise CodegenBackendError(
+            "codegen split_with_sizes expects at most three inputs"
+        )
+    input_arg = node.args[0]
+    split_sizes = node.args[1]
+    dim = node.args[2] if len(node.args) > 2 else None
+    if node.kwargs:
+        if "split_sizes" in node.kwargs:
+            if split_sizes is not None:
+                raise error_kwarg_specified_once("split_with_sizes", "split_sizes")
+            split_sizes = node.kwargs["split_sizes"]
+        if "dim" in node.kwargs:
+            if dim is not None:
+                raise error_kwarg_specified_once("split_with_sizes", "dim")
+            dim = node.kwargs["dim"]
+        extra = set(node.kwargs) - {"split_sizes", "dim"}
+        if extra:
+            raise CodegenBackendError(
+                "codegen split_with_sizes got unexpected kwargs: "
+                f"{sorted(extra)}"
+            )
+    if dim is None:
+        dim_value = 0
+    else:
+        dim_value = parse_constant_int("split_with_sizes", "dim", dim)
+    if isinstance(split_sizes, torch.Size):
+        split_sizes_value = tuple(split_sizes)
+    elif isinstance(split_sizes, torch.Tensor):
+        if split_sizes.dim() != 1:
+            raise CodegenBackendError(
+                "codegen split_with_sizes expects split_sizes to be 1D"
+            )
+        split_sizes_value = tuple(split_sizes.tolist())
+    elif isinstance(split_sizes, (tuple, list)):
+        split_sizes_value = tuple(split_sizes)
+    else:
+        raise CodegenBackendError(
+            "codegen split_with_sizes expects split_sizes to be a sequence"
+        )
+    try:
+        split_sizes_value = tuple(
+            int(operator.index(item)) for item in split_sizes_value
+        )
+    except TypeError as exc:
+        raise CodegenBackendError(
+            "codegen split_with_sizes expects split_sizes to be a sequence of ints"
+        ) from exc
+    if not split_sizes_value:
+        raise CodegenBackendError(
+            "codegen split_with_sizes expects at least one split size"
+        )
+    return input_arg, split_sizes_value, dim_value
 
 
 def parse_diagonal_args(
@@ -494,4 +597,5 @@ __all__ = [
     "parse_masked_scatter_args",
     "parse_linear_args",
     "parse_resize_size",
+    "parse_split_with_sizes_args",
 ]
