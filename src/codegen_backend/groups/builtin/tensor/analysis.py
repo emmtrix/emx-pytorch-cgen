@@ -699,39 +699,62 @@ class TensorOpBuilder:
                 raise CodegenBackendError(
                     "codegen as_strided expects size and stride"
                 )
-            if isinstance(size, torch.fx.Node) or isinstance(stride, torch.fx.Node):
-                raise CodegenBackendError(
-                    "codegen as_strided expects size/stride to be constants"
-                )
             if storage_offset is None:
                 storage_offset = 0
-            if isinstance(storage_offset, torch.fx.Node):
-                raise CodegenBackendError(
-                    "codegen as_strided expects storage_offset to be an int"
-                )
-            size_tuple = normalize_as_strided_sequence(op_spec.name, size, "size")
+            if (
+                isinstance(storage_offset, torch.fx.Node)
+                and storage_offset in self._scalar_values
+            ):
+                storage_offset = self._scalar_values[storage_offset]
+            stride_input = (
+                stride
+                if isinstance(stride, torch.fx.Node) and stride in self._shapes
+                else None
+            )
+            size_tuple = normalize_as_strided_sequence(
+                op_spec.name,
+                size,
+                "size",
+                scalar_values=self._scalar_values,
+            )
             stride_tuple = normalize_as_strided_sequence(
-                op_spec.name, stride, "stride"
+                op_spec.name,
+                stride,
+                "stride",
+                scalar_values=self._scalar_values,
             )
             if len(size_tuple) != len(stride_tuple):
                 raise CodegenBackendError(
                     "codegen as_strided expects size and stride to match length"
                 )
-            storage_offset_value = int(operator.index(storage_offset))
-            if storage_offset_value < 0:
-                raise CodegenBackendError(
-                    "codegen as_strided expects storage_offset to be non-negative"
-                )
+            storage_offset_value = parse_constant_int(
+                op_spec.name, "storage_offset", storage_offset
+            )
+            inputs = [input_arg]
+            params = {
+                "size": size_tuple,
+                "view_strides": stride_tuple,
+                "storage_offset": storage_offset_value,
+            }
+            if stride_input is not None:
+                stride_shape = self._shapes[stride_input]
+                stride_dtype = self._dtypes[stride_input]
+                if stride_dtype not in (torch.int32, torch.int64):
+                    raise CodegenBackendError(
+                        "codegen as_strided expects stride tensor to have an int dtype"
+                    )
+                if len(stride_shape) != 1 or stride_shape[0] != len(size_tuple):
+                    raise CodegenBackendError(
+                        "codegen as_strided expects stride tensor to match size length"
+                    )
+                inputs.append(stride_input)
+                params["view_strides_input_index"] = len(inputs) - 1
             op_node = _OpNode(
                 node=node,
                 spec=op_spec,
-                inputs=[input_arg],
+                inputs=inputs,
                 output_shape=(),
-                params={
-                    "size": size_tuple,
-                    "view_strides": stride_tuple,
-                    "storage_offset": storage_offset_value,
-                },
+                params=params,
             )
             return self._finalize_node(
                 node, op_node, dtype_info, [self._shapes[input_arg]]
@@ -935,7 +958,9 @@ class TensorOpBuilder:
                 raise CodegenBackendError(
                     f"codegen {op_spec.name} got unexpected kwargs: {sorted(extra)}"
                 )
-        size = normalize_as_strided_sequence(op_spec.name, size_arg, "size")
+        size = normalize_as_strided_sequence(
+            op_spec.name, size_arg, "size", scalar_values=self._scalar_values
+        )
         input_shape = self._shapes[input_arg]
         output_numel = math.prod(size) if size else 1
         input_numel = math.prod(input_shape) if input_shape else 1
