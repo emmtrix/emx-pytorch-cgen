@@ -778,7 +778,7 @@
 | `embedding` | ✅ |
 | `embedding_backward` | — |
 | `embedding_bag` | — |
-| `embedding_dense_backward` | — |
+| `embedding_dense_backward` | ✅ |
 | `embedding_renorm` | — |
 | `embedding_renorm_` | — |
 | `embedding_sparse_backward` | — |
@@ -1719,5 +1719,5 @@
 
 ## Summary
 - total aten ops: 1714
-- supported by codegen: 269 / 1714 (15.7 %)
-- unsupported by codegen: 1445
+- supported by codegen: 270 / 1714 (15.8 %)
+- unsupported by codegen: 1444

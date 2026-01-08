@@ -135,5 +135,57 @@ def parse_embedding_bag_args(
         padding_idx_value,
     )
 
+def parse_embedding_dense_backward_args(
+    node: torch.fx.Node,
+) -> tuple[object, object, int, int, bool]:
+    op_name = "embedding_dense_backward"
+    if len(node.args) < 3:
+        raise CodegenBackendError(
+            f"codegen {op_name} expects grad_output, indices, and num_weights"
+        )
+    if len(node.args) > 5:
+        raise CodegenBackendError(
+            f"codegen {op_name} expects at most five arguments"
+        )
+    grad_output = node.args[0]
+    indices = node.args[1]
+    num_weights = node.args[2]
+    padding_idx = node.args[3] if len(node.args) > 3 else None
+    scale_grad_by_freq = node.args[4] if len(node.args) > 4 else None
+    if node.kwargs:
+        if "padding_idx" in node.kwargs:
+            if len(node.args) > 3:
+                raise error_kwarg_specified_once(op_name, "padding_idx")
+            padding_idx = node.kwargs["padding_idx"]
+        if "scale_grad_by_freq" in node.kwargs:
+            if len(node.args) > 4:
+                raise error_kwarg_specified_once(op_name, "scale_grad_by_freq")
+            scale_grad_by_freq = node.kwargs["scale_grad_by_freq"]
+        extra = set(node.kwargs) - {"padding_idx", "scale_grad_by_freq"}
+        if extra:
+            raise CodegenBackendError(
+                f"codegen {op_name} got unexpected kwargs: {sorted(extra)}"
+            )
+    if padding_idx is None or scale_grad_by_freq is None:
+        raise CodegenBackendError(
+            f"codegen {op_name} expects padding_idx and scale_grad_by_freq"
+        )
+    num_weights_value = parse_constant_int(op_name, "num_weights", num_weights)
+    padding_idx_value = parse_constant_int(op_name, "padding_idx", padding_idx)
+    scale_grad_value = parse_constant_bool(
+        op_name, "scale_grad_by_freq", scale_grad_by_freq
+    )
+    return (
+        grad_output,
+        indices,
+        num_weights_value,
+        padding_idx_value,
+        scale_grad_value,
+    )
 
-__all__ = ["parse_embedding_args", "parse_embedding_bag_args"]
+
+__all__ = [
+    "parse_embedding_args",
+    "parse_embedding_bag_args",
+    "parse_embedding_dense_backward_args",
+]

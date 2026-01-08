@@ -33,6 +33,7 @@ class OpKind(str, Enum):
     POOL2D_BACKWARD = "pool2d_backward"
     EMBEDDING = "embedding"
     EMBEDDING_BAG = "embedding_bag"
+    EMBEDDING_DENSE_BACKWARD = "embedding_dense_backward"
     GATHER = "gather"
     INDEX_SELECT = "index_select"
     BATCH_NORM = "batch_norm"

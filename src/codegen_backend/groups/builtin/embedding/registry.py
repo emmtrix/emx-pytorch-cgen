@@ -16,6 +16,12 @@ def build_supported_ops() -> dict[str, _OpSpec]:
         torch.ops.aten.embedding.default,
         torch.ops.aten.embedding,
     ).build()
+    registry.register_op(
+        "embedding_dense_backward", kind=OpKind.EMBEDDING_DENSE_BACKWARD
+    ).targets(
+        torch.ops.aten.embedding_dense_backward.default,
+        torch.ops.aten.embedding_dense_backward,
+    ).build()
     registry.register_op("_embedding_bag", kind=OpKind.EMBEDDING_BAG).targets(
         torch.ops.aten._embedding_bag.default,
         torch.ops.aten._embedding_bag,

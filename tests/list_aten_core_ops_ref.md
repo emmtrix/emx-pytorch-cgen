@@ -71,7 +71,7 @@
 | `div.Tensor_mode` | ✅ |
 | `elu` | ✅ |
 | `embedding` | ✅ |
-| `embedding_dense_backward` | — |
+| `embedding_dense_backward` | ✅ |
 | `empty.memory_format` | — |
 | `empty_strided` | ✅ |
 | `eq.Scalar` | ✅ |
@@ -197,5 +197,5 @@
 
 ## Summary
 - total core aten ops: 192
-- supported by codegen: 140 / 192 (72.9%)
-- unsupported by codegen: 52
+- supported by codegen: 141 / 192 (73.4%)
+- unsupported by codegen: 51
