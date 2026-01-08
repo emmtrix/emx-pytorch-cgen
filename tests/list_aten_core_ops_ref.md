@@ -121,12 +121,12 @@
 | `maximum` | ✅ |
 | `mean` | ✅ |
 | `mean.dim` | ✅ |
-| `min.dim` | — |
+| `min.dim` | ✅ |
 | `minimum` | ✅ |
 | `mm` | ✅ |
 | `mul.Scalar` | ✅ |
 | `mul.Tensor` | ✅ |
-| `native_dropout` | — |
+| `native_dropout` | ✅ |
 | `native_group_norm` | — |
 | `native_group_norm_backward` | — |
 | `native_layer_norm` | — |
@@ -134,7 +134,7 @@
 | `ne.Scalar` | ✅ |
 | `ne.Tensor` | ✅ |
 | `neg` | ✅ |
-| `nonzero` | — |
+| `nonzero` | ✅ |
 | `permute` | ✅ |
 | `pow.Scalar` | ✅ |
 | `pow.Tensor_Scalar` | ✅ |
@@ -151,7 +151,7 @@
 | `relu` | ✅ |
 | `remainder.Scalar` | ✅ |
 | `remainder.Tensor` | ✅ |
-| `repeat` | — |
+| `repeat` | ✅ |
 | `replication_pad2d` | — |
 | `replication_pad3d` | — |
 | `resize_` | ✅ |
@@ -163,7 +163,7 @@
 | `scatter_add` | — |
 | `scatter_reduce.two` | — |
 | `select.int` | ✅ |
-| `select_scatter` | — |
+| `select_scatter` | ✅ |
 | `sigmoid` | ✅ |
 | `sign` | ✅ |
 | `sin` | ✅ |
@@ -171,7 +171,7 @@
 | `slice.Tensor` | ✅ |
 | `slice_scatter` | — |
 | `sort` | — |
-| `split_with_sizes` | — |
+| `split_with_sizes` | ✅ |
 | `sqrt` | ✅ |
 | `squeeze.dim` | ✅ |
 | `squeeze.dims` | ✅ |

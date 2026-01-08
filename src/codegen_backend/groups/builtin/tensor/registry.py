@@ -59,6 +59,10 @@ def build_supported_ops() -> dict[str, _OpSpec]:
         torch.ops.aten.squeeze.dim,
         torch.ops.aten.squeeze.dims,
     ).build()
+    registry.register_op("repeat", kind=OpKind.REPEAT).targets(
+        torch.ops.aten.repeat.default,
+        torch.ops.aten.repeat,
+    ).build()
     registry.register_op("cat", kind=OpKind.CONCAT).targets(
         torch.cat,
         torch.ops.aten.cat.default,
@@ -90,10 +94,18 @@ def build_supported_ops() -> dict[str, _OpSpec]:
         torch.ops.aten.masked_scatter_,
         arg_index=0,
     ).build()
+    registry.register_op("select_scatter", kind=OpKind.SELECT_SCATTER).targets(
+        torch.ops.aten.select_scatter.default,
+        torch.ops.aten.select_scatter,
+    ).build()
     registry.register_op("index_select", kind=OpKind.INDEX_SELECT).targets(
         torch.index_select,
         torch.ops.aten.index_select.default,
         torch.ops.aten.index_select,
+    ).build()
+    registry.register_op("split_with_sizes", kind=OpKind.SPLIT_WITH_SIZES).targets(
+        torch.ops.aten.split_with_sizes.default,
+        torch.ops.aten.split_with_sizes,
     ).build()
     registry.register_op("diagonal", kind=OpKind.DIAGONAL).targets(
         torch.diagonal,
@@ -179,6 +191,14 @@ def build_supported_ops() -> dict[str, _OpSpec]:
     registry.register_op("_cdist_forward", kind=OpKind.CDIST).targets(
         torch.ops.aten._cdist_forward,
         torch.ops.aten._cdist_forward.default,
+    ).build()
+    registry.register_op("nonzero", kind=OpKind.NONZERO).targets(
+        torch.nonzero,
+        torch.ops.aten.nonzero,
+        torch.ops.aten.nonzero.default,
+    registry.register_op("native_dropout", kind=OpKind.DROPOUT).targets(
+        torch.ops.aten.native_dropout,
+        torch.ops.aten.native_dropout.default,
     ).build()
 
     return registry.build()
