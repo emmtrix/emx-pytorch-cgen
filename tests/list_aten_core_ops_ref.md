@@ -151,7 +151,7 @@
 | `relu` | ✅ |
 | `remainder.Scalar` | ✅ |
 | `remainder.Tensor` | ✅ |
-| `repeat` | — |
+| `repeat` | ✅ |
 | `replication_pad2d` | — |
 | `replication_pad3d` | — |
 | `resize_` | ✅ |

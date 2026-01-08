@@ -1378,7 +1378,7 @@
 | `rename_` | — |
 | `renorm` | — |
 | `renorm_` | — |
-| `repeat` | — |
+| `repeat` | ✅ |
 | `repeat_interleave` | — |
 | `replace` | — |
 | `replication_pad1d` | — |
