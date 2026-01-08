@@ -693,7 +693,7 @@ CODEGEN_OP_TEST_CONFIG = {
     },
 }
 DEFAULT_CONSTRAINTS = {
-    "allowed_dtypes": (torch.float32, torch.int8, torch.int32, torch.bool),
+    "allowed_dtypes": (torch.float32, torch.int8, torch.uint8, torch.int32, torch.bool),
     "allow_noncontiguous": True,
     "allow_non_tensor_args": True,
     "allow_kwargs": True,
@@ -837,7 +837,7 @@ def _reference_for_dtype(
     kwargs: dict[str, object],
     dtype: torch.dtype,
 ) -> torch.Tensor:
-    if dtype not in (torch.int8, torch.int32, torch.bool):
+    if dtype not in (torch.int8, torch.uint8, torch.int32, torch.bool):
         return aten_overload(*inputs, **kwargs)
     try:
         expected = aten_overload(*inputs, **kwargs)
@@ -892,7 +892,7 @@ class TestCodegenOpInfo(TestCase):
                 continue
             result = compiled(*inputs, **kwargs)
             expected = _match_expected_dtype(result, expected)
-            compare_kwargs = {"equal_nan": dtype in (torch.int8, torch.int32)}
+            compare_kwargs = {"equal_nan": dtype in (torch.int8, torch.uint8, torch.int32)}
             if constraints.get("equal_nan"):
                 compare_kwargs["equal_nan"] = True
             if constraints["rtol"] is not None or constraints["atol"] is not None:

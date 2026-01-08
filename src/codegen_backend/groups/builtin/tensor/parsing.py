@@ -303,11 +303,11 @@ def parse_cumsum_args(
     if dtype is not None:
         if isinstance(dtype, torch.fx.Node):
             raise CodegenBackendError(
-                f"codegen {op_name} expects dtype to be torch.float32, torch.int8, torch.int32, or torch.bool"
+                f"codegen {op_name} expects dtype to be torch.float32, torch.int8, torch.uint8, torch.int32, or torch.bool"
             )
-        if dtype not in (torch.float32, torch.int8, torch.int32, torch.bool):
+        if dtype not in (torch.float32, torch.int8, torch.uint8, torch.int32, torch.bool):
             raise CodegenBackendError(
-                f"codegen {op_name} expects dtype to be torch.float32, torch.int8, torch.int32, or torch.bool"
+                f"codegen {op_name} expects dtype to be torch.float32, torch.int8, torch.uint8, torch.int32, or torch.bool"
             )
     return dim_value, dtype
 
