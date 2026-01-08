@@ -173,6 +173,7 @@ CODEGEN_ATEN_OPS = [
     torch.ops.aten.arcsinh.default,
     torch.ops.aten.arctan.default,
     torch.ops.aten.arange.start_step,
+    torch.ops.aten._local_scalar_dense.default,
     torch.ops.aten.bitwise_and.Tensor,
     torch.ops.aten.bitwise_and.Scalar,
     torch.ops.aten.bitwise_left_shift.Tensor,
@@ -643,6 +644,7 @@ CODEGEN_SPECIAL_TEST_OPS = [
     torch.ops.aten.col2im.default,
     torch.ops.aten.constant_pad_nd.default,
     torch.ops.aten.copy.default,
+    torch.ops.aten._local_scalar_dense.default,
     torch.ops.aten.div.Tensor_mode,
     torch.ops.aten.div.Scalar_mode,
     torch.ops.aten.squeeze.dim,
@@ -927,6 +929,16 @@ class TestCodegenOpInfo(TestCase):
 
 
 class TestCodegenSpecialOps(TestCase):
+    def test_codegen_local_scalar_dense(self):
+        input_tensor = torch.tensor(3.5)
+        compiled = torch.compile(
+            lambda inp: torch.ops.aten._local_scalar_dense.default(inp),
+            backend=codegen_generic_backend,
+        )
+        expected = torch.ops.aten._local_scalar_dense.default(input_tensor)
+        result = compiled(input_tensor)
+        torch.testing.assert_close(result, expected)
+
     def test_codegen_adaptive_avg_pool3d(self):
         input_tensor = torch.randn(1, 2, 4, 4, 4)
         compiled = torch.compile(
