@@ -1430,7 +1430,7 @@
 | `rstrip` | — |
 | `rsub` | — |
 | `save` | — |
-| `scalar_tensor` | — |
+| `scalar_tensor` | ✅ |
 | `scaled_dot_product_attention` | — |
 | `scatter` | — |
 | `scatter_` | — |

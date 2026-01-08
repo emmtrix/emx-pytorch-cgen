@@ -157,7 +157,7 @@
 | `resize_` | ✅ |
 | `round` | ✅ |
 | `rsqrt` | ✅ |
-| `scalar_tensor` | — |
+| `scalar_tensor` | ✅ |
 | `scatter.src` | — |
 | `scatter.value` | — |
 | `scatter_add` | — |

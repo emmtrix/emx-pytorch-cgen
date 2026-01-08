@@ -184,6 +184,7 @@ CODEGEN_ATEN_OPS = [
     torch.ops.aten.arctan.default,
     torch.ops.aten.arange.start_step,
     torch.ops.aten._local_scalar_dense.default,
+    torch.ops.aten.scalar_tensor.default,
     torch.ops.aten.bitwise_and.Tensor,
     torch.ops.aten.bitwise_and.Scalar,
     torch.ops.aten.bitwise_left_shift.Tensor,
@@ -697,6 +698,9 @@ CODEGEN_OP_TEST_CONFIG = {
     torch.ops.aten.where.Scalar: {},
     torch.ops.aten.full_like.default: {},
     torch.ops.aten.arange.start_step: {
+        "allow_no_tensor_inputs": True,
+    },
+    torch.ops.aten.scalar_tensor.default: {
         "allow_no_tensor_inputs": True,
     },
     torch.ops.aten.avg_pool2d_backward.default: {

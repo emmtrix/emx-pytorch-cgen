@@ -32,6 +32,11 @@ def build_supported_ops() -> dict[str, _OpSpec]:
         torch.ops.aten.empty_strided.default,
         torch.ops.aten.empty_strided,
     ).build()
+    registry.register_op("scalar_tensor", OpKind.SCALAR_TENSOR).targets(
+        torch.scalar_tensor,
+        torch.ops.aten.scalar_tensor.default,
+        torch.ops.aten.scalar_tensor,
+    ).build()
     registry.register_op("as_strided", kind=OpKind.VIEW).targets(
         torch.ops.aten.as_strided.default,
         torch.ops.aten.as_strided,

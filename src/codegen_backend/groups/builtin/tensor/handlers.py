@@ -35,6 +35,7 @@ from codegen_backend.emitters.pad import PadEmitter
 from codegen_backend.emitters.pdist import PdistEmitter
 from codegen_backend.emitters.repeat import RepeatEmitter
 from codegen_backend.emitters.resize import ResizeEmitter
+from codegen_backend.emitters.scalar_tensor import ScalarTensorEmitter
 from codegen_backend.emitters.select_scatter import SelectScatterEmitter
 from codegen_backend.emitters.split_with_sizes import SplitWithSizesEmitter
 from codegen_backend.emitters.view import ViewEmitter
@@ -293,6 +294,20 @@ class EmptyStridedHandler(OpKindHandler):
         if size is None:
             raise CodegenBackendError("codegen empty_strided expects a size argument")
         return tuple(size)
+
+
+class ScalarTensorHandler(OpKindHandler):
+    def emit(
+        self, node_index: int, op_node: _OpNode, graph: _GenericGraph
+    ) -> List[str]:
+        return self._emit_standard(node_index, op_node, graph, inputs=())
+
+    def infer_shapes(
+        self,
+        op_node: _OpNode,
+        input_shapes: Sequence[Tuple[int, ...]],
+    ) -> Tuple[int, ...]:
+        return ()
 
 
 class DiagonalHandler(OpKindHandler):
@@ -1411,6 +1426,100 @@ class _BackendEmptyStridedHandler(EmptyStridedHandler):
         return OpNodeBuildResult(op_node)
 
 
+class _BackendScalarTensorHandler(ScalarTensorHandler):
+    def infer_graph_dtype(
+        self, node: torch.fx.Node, op_spec: _OpSpec
+    ) -> torch.dtype | None:
+        dtype_value = node.kwargs.get("dtype")
+        if isinstance(dtype_value, torch.fx.Node):
+            raise CodegenBackendError(
+                "codegen scalar_tensor expects dtype to be a constant"
+            )
+        if dtype_value is None:
+            raise CodegenBackendError(
+                "codegen scalar_tensor requires dtype when no tensor inputs are provided"
+            )
+        return dtype_value
+
+    def build_op_node(
+        self,
+        node: torch.fx.Node,
+        op_spec: _OpSpec,
+        dtype_info: _CodegenDType | None,
+        shapes: Dict[torch.fx.Node, tuple[int, ...]],
+        strides: Dict[torch.fx.Node, tuple[int, ...]],
+        dtypes: Dict[torch.fx.Node, torch.dtype],
+        scalar_values: Dict[torch.fx.Node, object],
+        inplace_input: int | None,
+    ) -> OpNodeBuildResult | None:
+        if dtype_info is None:
+            return None
+        if len(node.args) != 1:
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} expects a single scalar argument"
+            )
+        allowed_kwargs = {
+            "dtype",
+            "layout",
+            "device",
+            "pin_memory",
+            "requires_grad",
+        }
+        extra = set(node.kwargs) - allowed_kwargs
+        if extra:
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} got unexpected kwargs: {sorted(extra)}"
+            )
+        if node.kwargs.get("layout") is not None:
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} expects layout to be None"
+            )
+        device = node.kwargs.get("device")
+        if device is not None and device != "cpu" and device != torch.device("cpu"):
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} expects device to be None or cpu"
+            )
+        pin_memory = node.kwargs.get("pin_memory")
+        if pin_memory not in (None, False):
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} expects pin_memory to be False"
+            )
+        requires_grad = node.kwargs.get("requires_grad")
+        if requires_grad not in (None, False):
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} expects requires_grad to be False"
+            )
+        dtype_value = node.kwargs.get("dtype")
+        if dtype_value is None:
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} requires dtype when no tensor inputs are provided"
+            )
+        if isinstance(dtype_value, torch.fx.Node):
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} expects dtype to be a constant"
+            )
+        if dtype_value is not dtype_info.torch_dtype:
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} expects dtype to match the graph dtype"
+            )
+        scalar_value = self._ctx.analysis_service.resolve_scalar_arg(
+            op_spec.name, node.args[0], scalar_values
+        )
+        op_node = _OpNode(
+            node=node,
+            spec=op_spec,
+            inputs=[],
+            output_shape=(),
+            params={"value": scalar_value},
+        )
+        output_shape = self._ctx.analysis_service.infer_output_shape(op_node, [])
+        op_node.output_shape = output_shape
+        shapes[node] = output_shape
+        dtypes[node] = dtype_info.torch_dtype
+        strides[node] = _contiguous_strides(output_shape)
+        return OpNodeBuildResult(op_node)
+
+
 def build_handlers(context: TensorContext) -> Dict[OpKind, OpKindHandler]:
     return {
         OpKind.ARANGE: _BackendArangeHandler(context, ArangeEmitter()),
@@ -1444,6 +1553,9 @@ def build_handlers(context: TensorContext) -> Dict[OpKind, OpKindHandler]:
         OpKind.CONCAT: _BackendConcatHandler(context, ConcatEmitter()),
         OpKind.EMPTY_STRIDED: _BackendEmptyStridedHandler(
             context, EmptyStridedEmitter()
+        ),
+        OpKind.SCALAR_TENSOR: _BackendScalarTensorHandler(
+            context, ScalarTensorEmitter()
         ),
         OpKind.DIAGONAL: DiagonalHandler(
             context,
@@ -1621,6 +1733,9 @@ def build_kind_handler_registrations() -> Dict[OpKind, "KindHandlerRegistration"
         ),
         OpKind.EMPTY_STRIDED: KindHandlerRegistration(
             _BackendEmptyStridedHandler, EmptyStridedEmitter
+        ),
+        OpKind.SCALAR_TENSOR: KindHandlerRegistration(
+            _BackendScalarTensorHandler, ScalarTensorEmitter
         ),
         OpKind.MASKED_SCATTER: KindHandlerRegistration(
             MaskedScatterHandler, MaskedScatterEmitter
