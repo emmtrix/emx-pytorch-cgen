@@ -121,7 +121,7 @@
 | `maximum` | ✅ |
 | `mean` | ✅ |
 | `mean.dim` | ✅ |
-| `min.dim` | — |
+| `min.dim` | ✅ |
 | `minimum` | ✅ |
 | `mm` | ✅ |
 | `mul.Scalar` | ✅ |

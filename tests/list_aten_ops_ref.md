@@ -1179,7 +1179,7 @@
 | `mean` | ✅ |
 | `median` | — |
 | `meshgrid` | — |
-| `min` | — |
+| `min` | ✅ |
 | `minimum` | ✅ |
 | `miopen_batch_norm` | — |
 | `miopen_batch_norm_backward` | — |
