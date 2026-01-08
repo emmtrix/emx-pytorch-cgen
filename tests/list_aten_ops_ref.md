@@ -1242,7 +1242,7 @@
 | `native_batch_norm` | — |
 | `native_batch_norm_backward` | — |
 | `native_channel_shuffle` | — |
-| `native_dropout` | — |
+| `native_dropout` | ✅ |
 | `native_dropout_backward` | — |
 | `native_group_norm` | — |
 | `native_group_norm_backward` | — |
@@ -1719,5 +1719,5 @@
 
 ## Summary
 - total aten ops: 1714
-- supported by codegen: 277 / 1714 (16.2 %)
-- unsupported by codegen: 1437
+- supported by codegen: 279 / 1714 (16.3 %)
+- unsupported by codegen: 1435
