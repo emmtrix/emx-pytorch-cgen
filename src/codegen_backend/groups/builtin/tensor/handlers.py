@@ -538,13 +538,15 @@ class LinearHandler(OpKindHandler):
         input_shapes: Sequence[Tuple[int, ...]],
     ) -> Tuple[int, ...]:
         input_shape, weight_shape = input_shapes[:2]
-        if len(input_shape) != 2 or len(weight_shape) != 2:
-            raise CodegenBackendError("codegen linear expects 2D input and weight")
-        if input_shape[1] != weight_shape[1]:
+        if len(input_shape) < 2 or len(weight_shape) != 2:
+            raise CodegenBackendError(
+                "codegen linear expects input rank >= 2 and 2D weight"
+            )
+        if input_shape[-1] != weight_shape[1]:
             raise CodegenBackendError(
                 "codegen linear requires input and weight inner dims to match"
             )
-        output_shape = (input_shape[0], weight_shape[0])
+        output_shape = (*input_shape[:-1], weight_shape[0])
         if op_node.p("has_bias", False):
             bias_shape = input_shapes[2]
             if (

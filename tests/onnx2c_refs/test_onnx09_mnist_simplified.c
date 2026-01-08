@@ -160,13 +160,13 @@ void node4_reshape_f32(const float a[1][12][3][3], float out[1][108]) {
 }
 
 void node5_linear_f32(const float input[1][108], const float weight[10][108], const float bias[10], float out[1][10]) {
-    for (int64_t i = 0; i < 1; ++i) {
+    for (int64_t i0 = 0; i0 < 1; ++i0) {
         for (int64_t j = 0; j < 10; ++j) {
             float acc = 0.0f;
             for (int64_t t = 0; t < 108; ++t) {
-                acc += input[i][t] * weight[j][t];
+                acc += input[i0][t] * weight[j][t];
             }
-            out[i][j] = acc + bias[j];
+            out[i0][j] = acc + bias[j];
         }
     }
 }

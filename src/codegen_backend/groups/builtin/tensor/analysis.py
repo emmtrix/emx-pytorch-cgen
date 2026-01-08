@@ -444,6 +444,11 @@ class TensorOpBuilder:
         input_nodes = [input_arg, weight_arg]
         input_shapes = [self._shapes[input_arg], self._shapes[weight_arg]]
         input_dtypes = [self._dtypes[arg] for arg in input_nodes]
+        input_shape, weight_shape = input_shapes
+        if len(input_shape) < 2 or len(weight_shape) != 2:
+            raise CodegenBackendError(
+                "codegen linear expects input rank >= 2 and 2D weight"
+            )
         if bias is not None:
             if not isinstance(bias, torch.fx.Node) or bias not in self._shapes:
                 raise error_expected_tensor(op_spec.name)
