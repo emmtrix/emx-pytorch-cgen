@@ -54,7 +54,7 @@
 | `cat` | ✅ |
 | `ceil` | ✅ |
 | `clamp` | ✅ |
-| `clamp.Tensor` | — |
+| `clamp.Tensor` | ✅ |
 | `clone` | ✅ |
 | `col2im` | ✅ |
 | `constant_pad_nd` | ✅ |
