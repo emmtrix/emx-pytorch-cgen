@@ -1,5 +1,4 @@
 import copy
-import numbers
 import operator
 from pathlib import Path
 import sys
@@ -77,109 +76,18 @@ def _normalize_pool1d_param(value):
         return None
 
 
-def _native_batch_norm_legit_sample_filter(sample):
-    if len(sample.args) < 5:
-        return False
-    training = sample.args[4]
-    if training not in (False, 0):
-        return False
-    if len(sample.args) < 7:
-        return False
-    momentum = sample.args[5]
-    eps = sample.args[6]
-    return isinstance(momentum, numbers.Number) and isinstance(eps, numbers.Number)
-
-
 def _as_strided_sequence(value):
     if isinstance(value, torch.Size):
         return tuple(value)
+    if isinstance(value, torch.Tensor):
+        if value.numel() == 1:
+            return (value.item(),)
+        if value.dim() != 1:
+            return None
+        return tuple(value.tolist())
     if isinstance(value, (tuple, list)):
         return tuple(value)
     return None
-
-
-def _as_strided_sample_filter(sample):
-    if not isinstance(sample.input, torch.Tensor):
-        return False
-    if len(sample.args) < 2:
-        return False
-    size = _as_strided_sequence(sample.args[0])
-    stride = _as_strided_sequence(sample.args[1])
-    if size is None or stride is None:
-        return False
-    try:
-        for item in size:
-            if isinstance(item, torch.Tensor):
-                return False
-            operator.index(item)
-        for item in stride:
-            if isinstance(item, torch.Tensor):
-                return False
-            operator.index(item)
-    except TypeError:
-        return False
-    if len(size) != len(stride):
-        return False
-    storage_offset = sample.kwargs.get("storage_offset", 0)
-    if storage_offset is None or isinstance(storage_offset, torch.Tensor):
-        return False
-    try:
-        storage_offset_value = int(operator.index(storage_offset))
-    except TypeError:
-        return False
-    if storage_offset_value < 0:
-        return False
-    return True
-
-
-def _cdist_sample_filter(sample):
-    if not isinstance(sample.input, torch.Tensor):
-        return False
-    if len(sample.args) < 2:
-        return False
-    x2 = sample.args[0]
-    if not isinstance(x2, torch.Tensor):
-        return False
-    p_value = sample.args[1]
-    compute_mode = sample.args[2] if len(sample.args) > 2 else None
-    try:
-        p_value = float(p_value)
-    except (TypeError, ValueError):
-        return False
-    if p_value != 2.0:
-        return False
-    if compute_mode not in (None, 0):
-        return False
-    if sample.input.ndim != 2 or x2.ndim != 2:
-        return False
-    if sample.input.shape[1] != x2.shape[1]:
-        return False
-    if not sample.input.is_contiguous() or not x2.is_contiguous():
-        return False
-    return True
-
-
-def _linear_sample_filter(sample):
-    if not isinstance(sample.input, torch.Tensor):
-        return False
-    if not sample.args:
-        return False
-    weight = sample.args[0]
-    if not isinstance(weight, torch.Tensor):
-        return False
-    if sample.input.ndim != 2 or weight.ndim != 2:
-        return False
-    if sample.input.shape[1] != weight.shape[1]:
-        return False
-    if len(sample.args) > 1:
-        bias = sample.args[1]
-        if bias is None:
-            return True
-        if not isinstance(bias, torch.Tensor):
-            return False
-        if bias.ndim > 2:
-            return False
-    return True
 
 
 def _sample_matches_constraints(sample, dtype, constraints):
@@ -318,6 +226,7 @@ CODEGEN_ATEN_OPS = [
     torch.ops.aten.frac.default,
     torch.ops.aten.full_like.default,
     torch.ops.aten.gather.default,
+    torch.ops.aten.index_select.default,
     torch.ops.aten.heaviside.default,
     torch.ops.aten.hypot.default,
     torch.ops.aten.i0.default,
@@ -780,10 +689,6 @@ CODEGEN_OP_TEST_CONFIG = {
         "allowed_dtypes": (torch.float32, torch.int8, torch.int32),
         "allow_no_tensor_inputs": True,
     },
-    torch.ops.aten.as_strided.default: {
-        "allow_non_tensor_args": False,
-        "sample_filter": _as_strided_sample_filter,
-    },
     torch.ops.aten.argmax.default: {
         "allowed_dtypes": (torch.float32, torch.int8, torch.int32),
     },
@@ -801,9 +706,6 @@ CODEGEN_OP_TEST_CONFIG = {
     },
     torch.ops.aten._cdist_forward.default: {
         "allowed_dtypes": (torch.float32,),
-        "allow_noncontiguous": False,
-        "requires_contiguous": True,
-        "sample_filter": _cdist_sample_filter,
     },
     torch.ops.aten.gelu.default: {
         "allowed_dtypes": (torch.float32,),
@@ -871,7 +773,6 @@ CODEGEN_OP_TEST_CONFIG = {
         "allowed_dtypes": (torch.float32,),
         "allow_noncontiguous": False,
         "requires_contiguous": True,
-        "sample_filter": _native_batch_norm_legit_sample_filter,
     },
     torch.ops.aten.conv1d.default: {
         "allowed_dtypes": (torch.float32,),
@@ -896,8 +797,6 @@ CODEGEN_OP_TEST_CONFIG = {
     },
     torch.ops.aten.linear.default: {
         "allowed_dtypes": (torch.float32,),
-        "max_ndim": 2,
-        "sample_filter": _linear_sample_filter,
     },
 }
 DEFAULT_CONSTRAINTS = {

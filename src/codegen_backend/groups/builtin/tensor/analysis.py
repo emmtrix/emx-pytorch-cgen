@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import math
+import numbers
 import operator
 from typing import Dict, List, Sequence, Tuple
 
 import torch
 import torch.fx
 
+from codegen_backend import shape_utils
 from codegen_backend.analysis_helpers import (
     channels_last_3d_strides,
     channels_last_strides,
@@ -31,6 +33,7 @@ from codegen_backend.groups.builtin.tensor.parsing import (
     parse_diagonal_args,
     parse_empty_strided_stride,
     parse_gather_args,
+    parse_index_select_args,
     parse_linear_args,
     parse_resize_size,
 )
@@ -149,14 +152,6 @@ class TensorOpBuilder:
                 momentum,
                 eps,
             ) = node.args[:8]
-            if isinstance(training, torch.fx.Node):
-                raise CodegenBackendError(
-                    f"codegen {op_spec.name} expects constant training flag"
-                )
-            if training not in (False, 0):
-                raise CodegenBackendError(
-                    f"codegen {op_spec.name} supports only training=False"
-                )
         else:
             (
                 input_arg,
@@ -167,6 +162,7 @@ class TensorOpBuilder:
                 momentum,
                 eps,
             ) = node.args[:7]
+            training = False
         if not isinstance(input_arg, torch.fx.Node) or input_arg not in self._shapes:
             raise error_expected_tensor(op_spec.name)
         if (
@@ -245,11 +241,36 @@ class TensorOpBuilder:
                     f"codegen {op_spec.name} supports only torch.float32"
                 )
         try:
-            _ = float(
+            training_value = self._analysis_service.resolve_scalar_arg(
+                op_spec.name, training, self._scalar_values
+            )
+        except (TypeError, ValueError) as exc:
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} expects training to be a boolean"
+            ) from exc
+        if isinstance(training_value, numbers.Real) and not isinstance(
+            training_value, bool
+        ):
+            if float(training_value) not in (0.0, 1.0):
+                raise CodegenBackendError(
+                    f"codegen {op_spec.name} expects training to be a boolean"
+                )
+            training_value = bool(training_value)
+        if not isinstance(training_value, bool):
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} expects training to be a boolean"
+            )
+        try:
+            momentum_value = float(
                 self._analysis_service.resolve_scalar_arg(
                     op_spec.name, momentum, self._scalar_values
                 )
             )
+        except (TypeError, ValueError) as exc:
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} expects momentum to be a float"
+            ) from exc
+        try:
             eps_value = float(
                 self._analysis_service.resolve_scalar_arg(
                     op_spec.name, eps, self._scalar_values
@@ -272,6 +293,8 @@ class TensorOpBuilder:
             inplace_input=None,
             params={
                 "eps": eps_value,
+                "momentum": momentum_value,
+                "training": training_value,
                 "has_weight": weight_node is not None,
                 "has_bias": bias_node is not None,
             },
@@ -363,33 +386,60 @@ class TensorOpBuilder:
         if not isinstance(p, (int, float)):
             raise CodegenBackendError("codegen cdist expects p to be a number")
         p_value = float(p)
-        if math.isinf(p_value) or math.isnan(p_value):
-            raise CodegenBackendError("codegen cdist expects p to be finite")
+        if math.isnan(p_value):
+            raise CodegenBackendError("codegen cdist expects p to be a number")
+        if p_value < 0:
+            raise CodegenBackendError(
+                "codegen cdist expects p to be a non-negative number"
+            )
         if isinstance(compute_mode, torch.fx.Node):
             raise CodegenBackendError(
                 "codegen cdist expects compute_mode to be a string"
             )
-        if compute_mode is not None and compute_mode not in (
-            "use_mm_for_euclid_dist",
-        ):
-            raise CodegenBackendError(
-                "codegen cdist supports compute_mode='use_mm_for_euclid_dist' or None"
-            )
+        compute_mode_value = None
+        if compute_mode is not None:
+            if isinstance(compute_mode, str):
+                compute_mode_value = compute_mode
+            else:
+                try:
+                    compute_mode_index = int(operator.index(compute_mode))
+                except TypeError as exc:
+                    raise CodegenBackendError(
+                        "codegen cdist expects compute_mode to be a string"
+                    ) from exc
+                compute_mode_value = {
+                    0: "use_mm_for_euclid_dist_if_necessary",
+                    1: "use_mm_for_euclid_dist",
+                    2: "donot_use_mm_for_euclid_dist",
+                }.get(compute_mode_index)
+            if compute_mode_value not in (
+                "use_mm_for_euclid_dist_if_necessary",
+                "use_mm_for_euclid_dist",
+                "donot_use_mm_for_euclid_dist",
+            ):
+                raise CodegenBackendError(
+                    "codegen cdist supports compute_mode='use_mm_for_euclid_dist', "
+                    "'use_mm_for_euclid_dist_if_necessary', "
+                    "'donot_use_mm_for_euclid_dist', or None"
+                )
         x1_shape = self._shapes[x1]
         x2_shape = self._shapes[x2]
-        if len(x1_shape) != 2 or len(x2_shape) != 2:
-            raise CodegenBackendError("codegen cdist expects 2D inputs")
-        if x1_shape[1] != x2_shape[1]:
+        if len(x1_shape) < 2 or len(x2_shape) < 2:
+            raise CodegenBackendError("codegen cdist expects inputs with rank >= 2")
+        if x1_shape[-1] != x2_shape[-1]:
             raise CodegenBackendError(
-                "codegen cdist expects inputs to match in dimension 1"
+                "codegen cdist expects inputs to match in the last dimension"
             )
+        _ = shape_utils.broadcast_output_shape(
+            op_spec.name, x1_shape[:-2], x2_shape[:-2]
+        )
         op_node = _OpNode(
             node=node,
             spec=op_spec,
             inputs=[x1, x2],
             output_shape=(),
             inplace_input=None,
-            params={"p": p_value},
+            params={"p": p_value, "compute_mode": compute_mode_value},
         )
         return self._finalize_node(
             node, op_node, dtype_info, [x1_shape, x2_shape]
@@ -444,6 +494,11 @@ class TensorOpBuilder:
         input_nodes = [input_arg, weight_arg]
         input_shapes = [self._shapes[input_arg], self._shapes[weight_arg]]
         input_dtypes = [self._dtypes[arg] for arg in input_nodes]
+        input_shape, weight_shape = input_shapes
+        if len(input_shape) < 2 or len(weight_shape) != 2:
+            raise CodegenBackendError(
+                "codegen linear expects input rank >= 2 and 2D weight"
+            )
         if bias is not None:
             if not isinstance(bias, torch.fx.Node) or bias not in self._shapes:
                 raise error_expected_tensor(op_spec.name)
@@ -655,6 +710,49 @@ class TensorOpBuilder:
             node, op_node, dtype_info, [input_shape, index_shape]
         )
 
+    def build_index_select(
+        self, node: torch.fx.Node, op_spec: _OpSpec, dtype_info: _CodegenDType
+    ) -> _OpNode:
+        input_arg, dim, index = parse_index_select_args(node)
+        if not isinstance(input_arg, torch.fx.Node) or input_arg not in self._shapes:
+            raise error_expected_tensor(op_spec.name)
+        if not isinstance(index, torch.fx.Node) or index not in self._shapes:
+            raise error_expected_tensor(op_spec.name)
+        if self._dtypes[input_arg] is not dtype_info.torch_dtype:
+            raise CodegenBackendError(
+                "codegen index_select expects input to match the graph dtype"
+            )
+        if self._dtypes[index] not in _EMBEDDING_INDEX_DTYPES:
+            raise CodegenBackendError(
+                "codegen index_select expects index dtype to be torch.int32 or torch.int64"
+            )
+        input_shape = self._shapes[input_arg]
+        if not input_shape:
+            raise CodegenBackendError(
+                "codegen index_select expects input to have at least 1 dimension"
+            )
+        index_shape = self._shapes[index]
+        if len(index_shape) != 1:
+            raise CodegenBackendError(
+                "codegen index_select expects index to be a 1D tensor"
+            )
+        dim_value = parse_constant_int(op_spec.name, "dim", dim)
+        if dim_value < 0:
+            dim_value += len(input_shape)
+        if dim_value < 0 or dim_value >= len(input_shape):
+            raise CodegenBackendError("codegen index_select dim is out of range")
+        op_node = _OpNode(
+            node=node,
+            spec=op_spec,
+            inputs=[input_arg, index],
+            output_shape=(),
+            inplace_input=None,
+            params={"dim": dim_value},
+        )
+        return self._finalize_node(
+            node, op_node, dtype_info, [input_shape, index_shape]
+        )
+
     def build_view(
         self, node: torch.fx.Node, op_spec: _OpSpec, dtype_info: _CodegenDType
     ) -> _OpNode:
@@ -699,39 +797,62 @@ class TensorOpBuilder:
                 raise CodegenBackendError(
                     "codegen as_strided expects size and stride"
                 )
-            if isinstance(size, torch.fx.Node) or isinstance(stride, torch.fx.Node):
-                raise CodegenBackendError(
-                    "codegen as_strided expects size/stride to be constants"
-                )
             if storage_offset is None:
                 storage_offset = 0
-            if isinstance(storage_offset, torch.fx.Node):
-                raise CodegenBackendError(
-                    "codegen as_strided expects storage_offset to be an int"
-                )
-            size_tuple = normalize_as_strided_sequence(op_spec.name, size, "size")
+            if (
+                isinstance(storage_offset, torch.fx.Node)
+                and storage_offset in self._scalar_values
+            ):
+                storage_offset = self._scalar_values[storage_offset]
+            stride_input = (
+                stride
+                if isinstance(stride, torch.fx.Node) and stride in self._shapes
+                else None
+            )
+            size_tuple = normalize_as_strided_sequence(
+                op_spec.name,
+                size,
+                "size",
+                scalar_values=self._scalar_values,
+            )
             stride_tuple = normalize_as_strided_sequence(
-                op_spec.name, stride, "stride"
+                op_spec.name,
+                stride,
+                "stride",
+                scalar_values=self._scalar_values,
             )
             if len(size_tuple) != len(stride_tuple):
                 raise CodegenBackendError(
                     "codegen as_strided expects size and stride to match length"
                 )
-            storage_offset_value = int(operator.index(storage_offset))
-            if storage_offset_value < 0:
-                raise CodegenBackendError(
-                    "codegen as_strided expects storage_offset to be non-negative"
-                )
+            storage_offset_value = parse_constant_int(
+                op_spec.name, "storage_offset", storage_offset
+            )
+            inputs = [input_arg]
+            params = {
+                "size": size_tuple,
+                "view_strides": stride_tuple,
+                "storage_offset": storage_offset_value,
+            }
+            if stride_input is not None:
+                stride_shape = self._shapes[stride_input]
+                stride_dtype = self._dtypes[stride_input]
+                if stride_dtype not in (torch.int32, torch.int64):
+                    raise CodegenBackendError(
+                        "codegen as_strided expects stride tensor to have an int dtype"
+                    )
+                if len(stride_shape) != 1 or stride_shape[0] != len(size_tuple):
+                    raise CodegenBackendError(
+                        "codegen as_strided expects stride tensor to match size length"
+                    )
+                inputs.append(stride_input)
+                params["view_strides_input_index"] = len(inputs) - 1
             op_node = _OpNode(
                 node=node,
                 spec=op_spec,
-                inputs=[input_arg],
+                inputs=inputs,
                 output_shape=(),
-                params={
-                    "size": size_tuple,
-                    "view_strides": stride_tuple,
-                    "storage_offset": storage_offset_value,
-                },
+                params=params,
             )
             return self._finalize_node(
                 node, op_node, dtype_info, [self._shapes[input_arg]]
@@ -935,7 +1056,9 @@ class TensorOpBuilder:
                 raise CodegenBackendError(
                     f"codegen {op_spec.name} got unexpected kwargs: {sorted(extra)}"
                 )
-        size = normalize_as_strided_sequence(op_spec.name, size_arg, "size")
+        size = normalize_as_strided_sequence(
+            op_spec.name, size_arg, "size", scalar_values=self._scalar_values
+        )
         input_shape = self._shapes[input_arg]
         output_numel = math.prod(size) if size else 1
         input_numel = math.prod(input_shape) if input_shape else 1

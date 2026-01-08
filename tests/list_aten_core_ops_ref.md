@@ -97,7 +97,7 @@
 | `hardtanh` | ✅ |
 | `index.Tensor` | — |
 | `index_put` | — |
-| `index_select` | — |
+| `index_select` | ✅ |
 | `isinf` | ✅ |
 | `isnan` | ✅ |
 | `le.Scalar` | ✅ |

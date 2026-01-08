@@ -974,7 +974,7 @@
 | `index_put_` | — |
 | `index_reduce` | — |
 | `index_reduce_` | — |
-| `index_select` | — |
+| `index_select` | ✅ |
 | `index_select_backward` | — |
 | `indices` | — |
 | `indices_copy` | — |
