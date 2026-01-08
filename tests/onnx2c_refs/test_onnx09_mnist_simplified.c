@@ -170,7 +170,7 @@ void node5_linear_f32(const float input[1][108], const float weight[10][108], co
     }
 }
 
-void ref_codegen_main_f32(const float input_0[1][1][14][14], const float input_1[20][1][5][5], const float input_2[12][20][3][3], const int64_t input_3[1], const int64_t input_4[1], const float input_5[10][108], const float input_6[10], float out[1][10]) {
+void ref_codegen_main_f32(const float input_0[1][1][14][14], const float input_1[20][1][5][5], const float input_2[12][20][3][3], const float input_3[10][108], const float input_4[10], float out[1][10]) {
     float tmp_2[1][12][3][3];
     float tmp_3[1][108];
     float (*tmp_0)[20][5][5] = malloc(sizeof(float) * 1 * 20 * 5 * 5);
@@ -179,11 +179,11 @@ void ref_codegen_main_f32(const float input_0[1][1][14][14], const float input_1
     node2_relu_f32(tmp_0, tmp_1);
     node3_conv2d_f32(tmp_1, input_2, tmp_2);
     node4_reshape_f32(tmp_2, tmp_3);
-    node5_linear_f32(tmp_3, input_5, input_6, out);
+    node5_linear_f32(tmp_3, input_3, input_4, out);
     free(tmp_0);
     free(tmp_1);
 }
 
 void entry(const float in0[1][1][14][14], float out0[1][10]) {
-    ref_codegen_main_f32(in0, weight_Conv_8_weight, weight_Conv_10_weight, weight_tensor_constant0, weight_tensor_constant1, weight_Gemm_network_output_weight, weight_Gemm_network_output_bias, out0);
+    ref_codegen_main_f32(in0, weight_Conv_8_weight, weight_Conv_10_weight, weight_Gemm_network_output_weight, weight_Gemm_network_output_bias, out0);
 }
