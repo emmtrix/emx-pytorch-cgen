@@ -662,16 +662,16 @@ CODEGEN_SPECIAL_TEST_OPS = [
 ]
 CODEGEN_OP_TEST_CONFIG = {
     torch.ops.aten.clamp.default: {
-        "allowed_dtypes": (torch.float32, torch.int8, torch.int32),
+        "allowed_dtypes": (torch.float32, torch.float64, torch.int8, torch.int32),
     },
     torch.ops.aten.clamp.Tensor: {
-        "allowed_dtypes": (torch.float32,),
+        "allowed_dtypes": (torch.float32, torch.float64),
     },
     torch.ops.aten.clamp_.default: {
-        "allowed_dtypes": (torch.float32, torch.int8, torch.int32),
+        "allowed_dtypes": (torch.float32, torch.float64, torch.int8, torch.int32),
     },
     torch.ops.aten.clamp_.Tensor: {
-        "allowed_dtypes": (torch.float32,),
+        "allowed_dtypes": (torch.float32, torch.float64),
     },
     torch.ops.aten.where.self: {},
     torch.ops.aten.where.Scalar: {},
@@ -711,6 +711,7 @@ CODEGEN_OP_TEST_CONFIG = {
 DEFAULT_CONSTRAINTS = {
     "allowed_dtypes": (
         torch.float32,
+        torch.float64,
         torch.int8,
         torch.uint8,
         torch.uint32,
