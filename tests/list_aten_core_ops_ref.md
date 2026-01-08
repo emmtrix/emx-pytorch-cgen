@@ -71,7 +71,7 @@
 | `div.Tensor_mode` | ✅ |
 | `elu` | ✅ |
 | `embedding` | ✅ |
-| `embedding_dense_backward` | — |
+| `embedding_dense_backward` | ✅ |
 | `empty.memory_format` | — |
 | `empty_strided` | ✅ |
 | `eq.Scalar` | ✅ |

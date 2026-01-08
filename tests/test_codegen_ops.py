@@ -208,6 +208,7 @@ CODEGEN_ATEN_OPS = [
     torch.ops.aten.div.Tensor,
     torch.ops.aten.div.Scalar,
     torch.ops.aten.embedding.default,
+    torch.ops.aten.embedding_dense_backward.default,
     torch.ops.aten._embedding_bag.default,
     torch.ops.aten.erf.default,
     torch.ops.aten.erfc.default,
@@ -653,9 +654,13 @@ CODEGEN_SPECIAL_TEST_OPS = [
     torch.ops.aten._cdist_forward.default,
     torch.ops.aten._pdist_forward.default,
     torch.ops.aten._embedding_bag.default,
+    torch.ops.aten.embedding_dense_backward.default,
 ]
 CODEGEN_OP_TEST_CONFIG = {
     torch.ops.aten.embedding.default: {
+        "allowed_dtypes": (torch.float32,),
+    },
+    torch.ops.aten.embedding_dense_backward.default: {
         "allowed_dtypes": (torch.float32,),
     },
     torch.ops.aten.copysign.Tensor: {
@@ -1129,6 +1134,27 @@ class TestCodegenSpecialOps(TestCase):
 
         run(0, -1)
         run(1, 2)
+
+    def test_codegen_embedding_dense_backward(self):
+        grad_output = torch.randn(3, 4)
+        indices = torch.tensor([0, 1, 2], dtype=torch.int64)
+        num_weights = 5
+
+        def run(padding_idx):
+            compiled = torch.compile(
+                lambda grad, idx: torch.ops.aten.embedding_dense_backward.default(
+                    grad, idx, num_weights, padding_idx, False
+                ),
+                backend=codegen_generic_backend,
+            )
+            expected = torch.ops.aten.embedding_dense_backward.default(
+                grad_output, indices, num_weights, padding_idx, False
+            )
+            result = compiled(grad_output, indices)
+            torch.testing.assert_close(result, expected)
+
+        run(-1)
+        run(2)
 
 
 instantiate_device_type_tests(TestCodegenOpInfo, globals(), only_for="cpu")

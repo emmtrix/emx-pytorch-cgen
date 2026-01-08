@@ -778,7 +778,7 @@
 | `embedding` | ✅ |
 | `embedding_backward` | — |
 | `embedding_bag` | — |
-| `embedding_dense_backward` | — |
+| `embedding_dense_backward` | ✅ |
 | `embedding_renorm` | — |
 | `embedding_renorm_` | — |
 | `embedding_sparse_backward` | — |
