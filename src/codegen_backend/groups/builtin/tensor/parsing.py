@@ -13,7 +13,7 @@ from codegen_backend.analysis_helpers import (
 )
 from codegen_backend.dtypes import _CODEGEN_DTYPES, _CodegenDType
 from codegen_backend.errors import CodegenBackendError
-from codegen_backend.parsing.common import parse_constant_int
+from codegen_backend.parsing.common import parse_constant_bool, parse_constant_int
 
 
 def parse_gather_args(
@@ -522,6 +522,47 @@ def parse_cumsum_args(
                 f"codegen {op_name} expects dtype to be torch.float32, torch.float64, torch.int8, torch.uint8, torch.uint32, torch.int32, or torch.bool"
             )
     return dim_value, dtype
+
+
+def parse_sort_args(
+    op_name: str, node: torch.fx.Node
+) -> Tuple[object, int, bool, bool]:
+    if not node.args:
+        raise CodegenBackendError(f"codegen {op_name} expects one input")
+    if len(node.args) > 4:
+        raise CodegenBackendError(
+            f"codegen {op_name} expects at most four inputs (self, dim, descending, stable)"
+        )
+    input_arg = node.args[0]
+    dim = node.args[1] if len(node.args) > 1 else None
+    descending = node.args[2] if len(node.args) > 2 else None
+    stable = node.args[3] if len(node.args) > 3 else None
+    if node.kwargs:
+        if "dim" in node.kwargs:
+            if dim is not None:
+                raise error_kwarg_specified_once(op_name, "dim")
+            dim = node.kwargs["dim"]
+        if "descending" in node.kwargs:
+            if descending is not None:
+                raise error_kwarg_specified_once(op_name, "descending")
+            descending = node.kwargs["descending"]
+        if "stable" in node.kwargs:
+            if stable is not None:
+                raise error_kwarg_specified_once(op_name, "stable")
+            stable = node.kwargs["stable"]
+        extra = set(node.kwargs) - {"dim", "descending", "stable"}
+        if extra:
+            raise CodegenBackendError(
+                f"codegen {op_name} got unexpected kwargs: {sorted(extra)}"
+            )
+    dim_value = parse_constant_int(op_name, "dim", dim if dim is not None else -1)
+    descending_value = parse_constant_bool(
+        op_name, "descending", descending if descending is not None else False
+    )
+    stable_value = parse_constant_bool(
+        op_name, "stable", stable if stable is not None else False
+    )
+    return input_arg, dim_value, descending_value, stable_value
 
 
 def parse_arange_dtype(

@@ -1494,7 +1494,7 @@ This list shows all ATen operators, whether the codegen backend supports them, a
 | `softplus_backward` | — | — |
 | `softshrink` | — | 5 |
 | `softshrink_backward` | — | — |
-| `sort` | — | 58 |
+| `sort` | ✅ | 58 |
 | `sorted` | — | — |
 | `sparse_bsc_tensor` | — | — |
 | `sparse_bsr_tensor` | — | — |
@@ -1721,5 +1721,5 @@ This list shows all ATen operators, whether the codegen backend supports them, a
 
 ## Summary
 - total aten ops: 1714
-- supported by codegen: 293 / 1714 (17.1 %)
-- unsupported by codegen: 1421
+- supported by codegen: 294 / 1714 (17.2 %)
+- unsupported by codegen: 1420
