@@ -1430,7 +1430,7 @@
 | `rstrip` | — |
 | `rsub` | — |
 | `save` | — |
-| `scalar_tensor` | — |
+| `scalar_tensor` | ✅ |
 | `scaled_dot_product_attention` | — |
 | `scatter` | — |
 | `scatter_` | — |
@@ -1719,5 +1719,5 @@
 
 ## Summary
 - total aten ops: 1714
-- supported by codegen: 277 / 1714 (16.2 %)
-- unsupported by codegen: 1437
+- supported by codegen: 279 / 1714 (16.3 %)
+- unsupported by codegen: 1435

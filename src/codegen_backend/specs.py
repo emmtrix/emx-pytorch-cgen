@@ -42,6 +42,7 @@ class OpKind(str, Enum):
     CDIST = "cdist"
     PAD = "pad"
     EMPTY_STRIDED = "empty_strided"
+    SCALAR_TENSOR = "scalar_tensor"
     RESIZE = "resize"
     COL2IM = "col2im"
     MASKED_SCATTER = "masked_scatter"

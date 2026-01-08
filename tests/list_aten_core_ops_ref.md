@@ -157,7 +157,7 @@
 | `resize_` | ✅ |
 | `round` | ✅ |
 | `rsqrt` | ✅ |
-| `scalar_tensor` | — |
+| `scalar_tensor` | ✅ |
 | `scatter.src` | — |
 | `scatter.value` | — |
 | `scatter_add` | — |
@@ -197,5 +197,5 @@
 
 ## Summary
 - total core aten ops: 192
-- supported by codegen: 147 / 192 (76.6%)
-- unsupported by codegen: 45
+- supported by codegen: 149 / 192 (77.6%)
+- unsupported by codegen: 43
