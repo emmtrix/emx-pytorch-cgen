@@ -7,6 +7,7 @@ emx-pytorch2c generates simple, correct, generic, and easily analyzable C code f
 * Simple, correctness-preserving C code
 * Generic code that is easy to analyze and verify
 * A solid foundation for further analysis and verification tools
+* C code tuned for later vectorization via [emmtrix Code vectorizer (eCV)](https://www.emmtrix.com/tools/emmtrix-code-vectorizer)
 
 ## Non-Goals
 
@@ -14,11 +15,18 @@ emx-pytorch2c generates simple, correct, generic, and easily analyzable C code f
 
 ## Features
 
-* Supported operators (codegen backend): see [`tests/list_core_ops_ref.md`](tests/list_core_ops_ref.md) for core ops and [`tests/list_aten_ops_ref.md`](tests/list_aten_ops_ref.md) for all ATen ops.
-* `torch.compile` backend for generating generic C code from PyTorch workloads.
+* Supported operators: 
+  * see [`tests/list_core_ops_ref.md`](tests/list_core_ops_ref.md) for core ops.
+  * see [`tests/list_aten_ops_ref.md`](tests/list_aten_ops_ref.md) for all ATen ops.
 * Export utility for emitting standalone C sources from Python functions.
+* `torch.compile` backend for generating generic C code from PyTorch workloads for verification.
 * ONNX-to-C conversion via the `cli.onnx2c` command-line interface.
-* Supported dtypes for codegen graphs: `torch.float32`, `torch.int8`, `torch.int16`, `torch.int32`, `torch.uint8`, `torch.uint16`, `torch.uint32`, `torch.bool`.
+* Supported dtypes:
+  * `torch.float32` / `torch.float64`
+  * `torch.int8` / `torch.uint8`
+  * `torch.int16` / `torch.uint16`
+  * `torch.int32` / `torch.uint32`
+  * `torch.bool`
   * Index tensors for embedding/gather-style ops may also use `torch.int64`.
 
 ## Requirements
@@ -51,41 +59,9 @@ compiled = torch.compile(f, backend=codegen_generic_backend)
 print(compiled(torch.randn(2, 2), torch.randn(2, 2)))
 ```
 
-## Usage
+## Exported C Code Examples
 
-### 1) `torch.compile` (Codegen Backend)
-
-```python
-import torch
-from codegen_backend.backend import codegen_generic_backend
-
-
-def f(a, b):
-    return a + b
-
-compiled = torch.compile(f, backend=codegen_generic_backend)
-
-a = torch.randn(4, 4)
-b = torch.randn(4, 4)
-print(compiled(a, b))
-```
-
-### 2) Export generic C code
-
-```python
-import torch
-from codegen_backend.export import export_generic_c
-
-
-def f(a, b):
-    return a + b
-
-example_inputs = (torch.randn(4, 4), torch.randn(4, 4))
-result = export_generic_c(f, example_inputs, temp_allocation_threshold=2048)
-print(result.c_source)
-```
-
-#### Example: Generated C (from `tests/codegen_refs/add_single.c`)
+### Example 1: Simple Add
 
 Below is a minimal example of the emitted C for a simple add. It highlights two
 key characteristics of the generated code: explicit fixed-size arrays in the
@@ -105,7 +81,30 @@ In other words, shapes are materialized as explicit array extents, and compute
 is expressed as deterministic, nested `for` loops rather than vectorized or
 opaque library calls.
 
-### 3) ONNX to C via CLI
+### Example 2: Heap/Stack Temporary Allocation
+
+TBD
+
+
+
+## Usage
+
+### 1) Export generic C code
+
+```python
+import torch
+from codegen_backend.export import export_generic_c
+
+
+def f(a, b):
+    return a + b
+
+example_inputs = (torch.randn(4, 4), torch.randn(4, 4))
+result = export_generic_c(f, example_inputs, temp_allocation_threshold=2048)
+print(result.c_source)
+```
+
+### 2) ONNX to C via CLI
 
 Requires `onnx` and `onnx2pytorch`:
 
@@ -127,6 +126,23 @@ Tune temporary buffer allocation (defaults to 1024 bytes; set 0 for stack-only):
 
 ```bash
 python -m cli.onnx2c model.onnx -o model.c --tmp-malloc-threshold 2048
+```
+
+### 3) `torch.compile` (for verification)
+
+```python
+import torch
+from codegen_backend.backend import codegen_generic_backend
+
+
+def f(a, b):
+    return a + b
+
+compiled = torch.compile(f, backend=codegen_generic_backend)
+
+a = torch.randn(4, 4)
+b = torch.randn(4, 4)
+print(compiled(a, b))
 ```
 
 ## Tests
