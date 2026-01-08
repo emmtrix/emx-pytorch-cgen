@@ -181,15 +181,8 @@ static inline uint8_t ref_scalar_u8_round(uint8_t a) {
 }
 
 #define REF_U8_UNARY_FROM_F32(name)                         \
-    static inline uint8_t ref_scalar_u8_##name(uint8_t a) {  \
-        return ref_scalar_u8_from_f32(ref_scalar_f32_##name( \
-            (float)a));                                     \
-    }
-
-#define REF_U8_BINARY_FROM_F32(name)                                \
-    static inline uint8_t ref_scalar_u8_##name(uint8_t a, uint8_t b) { \
-        return ref_scalar_u8_from_f32(ref_scalar_f32_##name(         \
-            (float)a, (float)b));                                   \
+    static inline uint8_t ref_scalar_u8_##name(uint8_t a) { \
+        return ref_scalar_u8_from_f32(ref_scalar_f32_##name((float)a)); \
     }
 
 REF_U8_UNARY_FROM_F32(acos)

@@ -100,9 +100,14 @@ def _patch_onnx2pytorch_for_fx(onnx2pytorch_module) -> None:
         return
     from torch.fx.proxy import Proxy
     from onnx2pytorch.operations import add as onnx2pytorch_add
+    from onnx2pytorch.operations import batchnorm as onnx2pytorch_batchnorm
+    from onnx2pytorch.convert import model as onnx2pytorch_model
+    from torch.nn.modules.pooling import _MaxPoolNd
 
     original_is_constant = onnx2pytorch_utils.is_constant
     original_add_forward = onnx2pytorch_add.Add.forward
+    original_batchnorm_forward = onnx2pytorch_batchnorm.BatchNormWrapper.forward
+    original_maxpool_forward = _MaxPoolNd.forward
 
     def _fx_safe_is_constant(value):
         if isinstance(value, Proxy):
@@ -117,8 +122,48 @@ def _patch_onnx2pytorch_for_fx(onnx2pytorch_module) -> None:
             return out
         return original_add_forward(self, *input)
 
+    def _fx_safe_maxpool_forward(self, *input):
+        output = original_maxpool_forward(self, *input)
+        if self.return_indices:
+            return output[0]
+        return output
+
+    def _fx_safe_batchnorm_forward(
+        self, X, scale=None, B=None, input_mean=None, input_var=None
+    ):
+        if any(
+            isinstance(value, Proxy)
+            for value in (X, scale, B, input_mean, input_var)
+            if value is not None
+        ):
+            if self.has_lazy and not isinstance(X, Proxy):
+                self.bnu.initialize_parameters(X)
+            weight = scale if scale is not None else self.bnu.weight
+            bias = B if B is not None else self.bnu.bias
+            running_mean = input_mean if input_mean is not None else self.bnu.running_mean
+            running_var = input_var if input_var is not None else self.bnu.running_var
+            output, _, _ = torch.ops.aten._native_batch_norm_legit.default(
+                X,
+                weight,
+                bias,
+                running_mean,
+                running_var,
+                False,
+                0.0,
+                self.bnu.eps,
+            )
+            return output
+        return original_batchnorm_forward(self, X, scale, B, input_mean, input_var)
+
     onnx2pytorch_utils.is_constant = _fx_safe_is_constant
     onnx2pytorch_add.Add.forward = _fx_safe_add_forward
+    _MaxPoolNd.forward = _fx_safe_maxpool_forward
+    onnx2pytorch_model.MULTIOUTPUT_LAYERS = tuple(
+        layer
+        for layer in onnx2pytorch_model.MULTIOUTPUT_LAYERS
+        if layer is not _MaxPoolNd
+    )
+    onnx2pytorch_batchnorm.BatchNormWrapper.forward = _fx_safe_batchnorm_forward
     onnx2pytorch_utils._onnx2c_fx_patched = True
 
 
