@@ -11,6 +11,9 @@ from codegen_backend.analysis_helpers import resolve_scalar_arg
 from codegen_backend.errors import CodegenBackendError
 from codegen_backend.groups.analysis import GroupAnalysisResult, RegistryGroupAnalyzer
 from codegen_backend.groups.builtin.reductions.args import ReductionsArgParser
+from codegen_backend.groups.builtin.tensor.parsing import (
+    parse_split_with_sizes_args,
+)
 from codegen_backend.graph import _OpNode
 from codegen_backend.indexing import _contiguous_strides
 from codegen_backend.kinds import OpKind, OpKindHandler
@@ -65,6 +68,34 @@ class TensorAnalyzer(RegistryGroupAnalyzer):
         kind_handlers,
     ) -> GroupAnalysisResult:
         if node.op == "call_method" and node.target == "item":
+            return GroupAnalysisResult(op_node=None)
+        if node.op == "call_function" and node.target in {
+            torch.ops.aten.split_with_sizes,
+            torch.ops.aten.split_with_sizes.default,
+        }:
+            input_arg, split_sizes, dim = parse_split_with_sizes_args(node)
+            if (
+                not isinstance(input_arg, torch.fx.Node)
+                or input_arg not in shapes
+            ):
+                raise CodegenBackendError(
+                    "codegen split_with_sizes expects a tensor input"
+                )
+            input_shape = shapes[input_arg]
+            if dim < 0:
+                dim += len(input_shape)
+            if dim < 0 or dim >= len(input_shape):
+                raise CodegenBackendError(
+                    "codegen split_with_sizes dim is out of range"
+                )
+            if any(size < 0 for size in split_sizes):
+                raise CodegenBackendError(
+                    "codegen split_with_sizes expects non-negative split sizes"
+                )
+            if sum(split_sizes) != input_shape[dim]:
+                raise CodegenBackendError(
+                    "codegen split_with_sizes expects split sizes to sum to the input size"
+                )
             return GroupAnalysisResult(op_node=None)
         if node.op == "call_function" and node.target is operator.getitem:
             op_node = self._handle_getitem_node(
@@ -121,6 +152,76 @@ class TensorAnalyzer(RegistryGroupAnalyzer):
             raise CodegenBackendError(
                 "codegen backend supports only constant getitem indices"
             )
+        if source.target in {
+            torch.ops.aten.split_with_sizes,
+            torch.ops.aten.split_with_sizes.default,
+        }:
+            input_arg, split_sizes, dim = parse_split_with_sizes_args(source)
+            if (
+                not isinstance(input_arg, torch.fx.Node)
+                or input_arg not in shapes
+            ):
+                raise CodegenBackendError(
+                    "codegen split_with_sizes expects a tensor input"
+                )
+            input_shape = shapes[input_arg]
+            if dim < 0:
+                dim += len(input_shape)
+            if dim < 0 or dim >= len(input_shape):
+                raise CodegenBackendError(
+                    "codegen split_with_sizes dim is out of range"
+                )
+            if any(size < 0 for size in split_sizes):
+                raise CodegenBackendError(
+                    "codegen split_with_sizes expects non-negative split sizes"
+                )
+            if sum(split_sizes) != input_shape[dim]:
+                raise CodegenBackendError(
+                    "codegen split_with_sizes expects split sizes to sum to the input size"
+                )
+            if isinstance(index, float) and index.is_integer():
+                index_value = int(index)
+            else:
+                try:
+                    index_value = int(operator.index(index))
+                except TypeError as exc:
+                    raise CodegenBackendError(
+                        "codegen split_with_sizes expects integer getitem indices"
+                    ) from exc
+            if index_value < 0 or index_value >= len(split_sizes):
+                raise CodegenBackendError(
+                    "codegen split_with_sizes getitem index is out of range"
+                )
+            split_offset = sum(split_sizes[:index_value])
+            split_size = split_sizes[index_value]
+            op_spec = self._supported_ops.get("split_with_sizes")
+            if op_spec is None:
+                raise CodegenBackendError(
+                    "codegen backend does not support split_with_sizes"
+                )
+            op_node = _OpNode(
+                node=node,
+                spec=op_spec,
+                inputs=[input_arg],
+                output_shape=(),
+                inplace_input=None,
+                params={
+                    "dim": dim,
+                    "offset": split_offset,
+                    "split_size": split_size,
+                },
+            )
+            handler = kind_handlers.get(op_spec.kind)
+            if handler is None:
+                raise CodegenBackendError(
+                    "codegen backend does not support kind 'split_with_sizes'"
+                )
+            output_shape = handler.infer_shapes(op_node, [input_shape])
+            op_node.output_shape = output_shape
+            shapes[node] = output_shape
+            strides[node] = _contiguous_strides(output_shape)
+            dtypes[node] = dtypes[input_arg]
+            return op_node
         if index not in (0, 0.0, 1, 1.0, 2, 2.0):
             raise CodegenBackendError(
                 "codegen backend supports only getitem[0], getitem[1], or getitem[2]"

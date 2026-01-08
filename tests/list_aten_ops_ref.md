@@ -1565,7 +1565,7 @@
 | `special_zeta` | — |
 | `split` | — |
 | `split_copy` | — |
-| `split_with_sizes` | — |
+| `split_with_sizes` | ✅ |
 | `split_with_sizes_copy` | — |
 | `splitlines` | — |
 | `sqrt` | ✅ |

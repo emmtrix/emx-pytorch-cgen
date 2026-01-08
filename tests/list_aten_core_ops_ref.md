@@ -171,7 +171,7 @@
 | `slice.Tensor` | ✅ |
 | `slice_scatter` | — |
 | `sort` | — |
-| `split_with_sizes` | — |
+| `split_with_sizes` | ✅ |
 | `sqrt` | ✅ |
 | `squeeze.dim` | ✅ |
 | `squeeze.dims` | ✅ |
