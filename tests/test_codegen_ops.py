@@ -728,13 +728,27 @@ CODEGEN_SPECIAL_TEST_OPS = [
 ]
 CODEGEN_OP_TEST_CONFIG = {
     torch.ops.aten.clamp.default: {
-        "allowed_dtypes": (torch.float32, torch.float64, torch.int8, torch.int32),
+        "allowed_dtypes": (
+            torch.float32,
+            torch.float64,
+            torch.int8,
+            torch.int32,
+            torch.int64,
+            torch.uint64,
+        ),
     },
     torch.ops.aten.clamp.Tensor: {
         "allowed_dtypes": (torch.float32, torch.float64),
     },
     torch.ops.aten.clamp_.default: {
-        "allowed_dtypes": (torch.float32, torch.float64, torch.int8, torch.int32),
+        "allowed_dtypes": (
+            torch.float32,
+            torch.float64,
+            torch.int8,
+            torch.int32,
+            torch.int64,
+            torch.uint64,
+        ),
     },
     torch.ops.aten.clamp_.Tensor: {
         "allowed_dtypes": (torch.float32, torch.float64),
@@ -793,7 +807,14 @@ CODEGEN_OP_TEST_CONFIG = {
         "sample_filter": _addmm_like_sample_filter,
     },
     torch.ops.aten.conj_physical.default: {
-        "allowed_dtypes": (torch.float32, torch.int8, torch.int32, torch.bool),
+        "allowed_dtypes": (
+            torch.float32,
+            torch.int8,
+            torch.int32,
+            torch.int64,
+            torch.uint64,
+            torch.bool,
+        ),
     },
 }
 DEFAULT_CONSTRAINTS = {
@@ -804,6 +825,8 @@ DEFAULT_CONSTRAINTS = {
         torch.uint8,
         torch.uint32,
         torch.int32,
+        torch.int64,
+        torch.uint64,
         torch.bool,
     ),
     "allow_noncontiguous": True,

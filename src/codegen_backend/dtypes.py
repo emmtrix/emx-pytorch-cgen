@@ -71,12 +71,26 @@ _CODEGEN_DTYPES = {
         scalar_prefix="ref_scalar_i32_",
         suffix="i32",
     ),
+    torch.int64: _CodegenDType(
+        torch_dtype=torch.int64,
+        c_type="int64_t",
+        scalar_header="ops_scalar_i64.h",
+        scalar_prefix="ref_scalar_i64_",
+        suffix="i64",
+    ),
     torch.bool: _CodegenDType(
         torch_dtype=torch.bool,
         c_type="bool",
         scalar_header="ops_scalar_bool.h",
         scalar_prefix="ref_scalar_bool_",
         suffix="bool",
+    ),
+    torch.uint64: _CodegenDType(
+        torch_dtype=torch.uint64,
+        c_type="uint64_t",
+        scalar_header="ops_scalar_u64.h",
+        scalar_prefix="ref_scalar_u64_",
+        suffix="u64",
     ),
 }
 
@@ -87,6 +101,8 @@ _INTEGER_CODEGEN_DTYPES = {
     torch.uint16,
     torch.uint32,
     torch.int32,
+    torch.int64,
+    torch.uint64,
 }
 _C_TYPE_BY_DTYPE = {
     torch.bool: "uint8_t",
@@ -97,6 +113,7 @@ _C_TYPE_BY_DTYPE = {
     torch.uint32: "uint32_t",
     torch.int32: "int32_t",
     torch.int64: "int64_t",
+    torch.uint64: "uint64_t",
     torch.float32: "float",
     torch.float64: "double",
 }
