@@ -1444,7 +1444,7 @@
 | `select` | ✅ |
 | `select_backward` | — |
 | `select_copy` | — |
-| `select_scatter` | — |
+| `select_scatter` | ✅ |
 | `selu` | ✅ |
 | `selu_` | — |
 | `set` | — |

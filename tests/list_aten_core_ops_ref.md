@@ -163,7 +163,7 @@
 | `scatter_add` | — |
 | `scatter_reduce.two` | — |
 | `select.int` | ✅ |
-| `select_scatter` | — |
+| `select_scatter` | ✅ |
 | `sigmoid` | ✅ |
 | `sign` | ✅ |
 | `sin` | ✅ |
