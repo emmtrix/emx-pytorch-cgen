@@ -1000,6 +1000,23 @@ class TensorOpBuilder:
         if src_shape != expected_src_shape:
             raise CodegenBackendError(
                 "codegen select_scatter expects src to match input shape without dim"
+            )
+        op_node = _OpNode(
+            node=node,
+            spec=op_spec,
+            inputs=[input_arg, src],
+            output_shape=(),
+            inplace_input=inplace_input,
+            params={"dim": dim_value, "index": index_value},
+        )
+        return self._finalize_node(
+            node,
+            op_node,
+            dtype_info,
+            [input_shape, src_shape],
+            inplace_input=inplace_input,
+        )
+
     def build_repeat(
         self, node: torch.fx.Node, op_spec: _OpSpec, dtype_info: _CodegenDType
     ) -> _OpNode:
@@ -1050,23 +1067,16 @@ class TensorOpBuilder:
         op_node = _OpNode(
             node=node,
             spec=op_spec,
-            inputs=[input_arg, src],
+            inputs=[input_arg],
             output_shape=(),
-            inplace_input=inplace_input,
-            params={"dim": dim_value, "index": index_value},
+            inplace_input=None,
+            params={"repeats": repeats},
         )
         return self._finalize_node(
             node,
             op_node,
             dtype_info,
-            [input_shape, src_shape],
-            inplace_input=inplace_input,
-            inputs=[input_arg],
-            output_shape=(),
-            params={"repeats": repeats},
-        )
-        return self._finalize_node(
-            node, op_node, dtype_info, [input_shape]
+            [input_shape],
         )
 
     def build_view(

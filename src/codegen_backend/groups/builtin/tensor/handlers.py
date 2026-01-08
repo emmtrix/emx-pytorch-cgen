@@ -448,11 +448,6 @@ class SplitWithSizesHandler(OpKindHandler):
                 "offset": int(op_node.p("offset", 0)),
             },
         )
-class NonzeroHandler(OpKindHandler):
-    def emit(
-        self, node_index: int, op_node: _OpNode, graph: _GenericGraph
-    ) -> List[str]:
-        return self._emit_standard(node_index, op_node, graph)
 
     def infer_shapes(
         self,
@@ -479,6 +474,20 @@ class NonzeroHandler(OpKindHandler):
             )
         output_shape = list(input_shape)
         output_shape[dim] = split_size
+        return tuple(output_shape)
+
+
+class NonzeroHandler(OpKindHandler):
+    def emit(
+        self, node_index: int, op_node: _OpNode, graph: _GenericGraph
+    ) -> List[str]:
+        return self._emit_standard(node_index, op_node, graph)
+
+    def infer_shapes(
+        self,
+        op_node: _OpNode,
+        input_shapes: Sequence[Tuple[int, ...]],
+    ) -> Tuple[int, ...]:
         output_shape = op_node.p("output_shape")
         if output_shape is None:
             raise CodegenBackendError("codegen nonzero expects output shape")
@@ -1600,6 +1609,7 @@ def build_handlers(context: TensorContext) -> Dict[OpKind, OpKindHandler]:
         OpKind.SPLIT_WITH_SIZES: SplitWithSizesHandler(
             context,
             SplitWithSizesEmitter(),
+        ),
         OpKind.NONZERO: _BackendNonzeroHandler(
             context,
             NonzeroEmitter(),
@@ -1742,6 +1752,7 @@ def build_kind_handler_registrations() -> Dict[OpKind, "KindHandlerRegistration"
         ),
         OpKind.SELECT_SCATTER: KindHandlerRegistration(
             SelectScatterHandler, SelectScatterEmitter
+        ),
         OpKind.NONZERO: KindHandlerRegistration(
             _BackendNonzeroHandler, NonzeroEmitter
         ),
