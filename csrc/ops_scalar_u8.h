@@ -180,4 +180,85 @@ static inline uint8_t ref_scalar_u8_round(uint8_t a) {
     return a;
 }
 
+#define REF_U8_UNARY_FROM_F32(name)                         \
+    static inline uint8_t ref_scalar_u8_##name(uint8_t a) {  \
+        return ref_scalar_u8_from_f32(ref_scalar_f32_##name( \
+            (float)a));                                     \
+    }
+
+#define REF_U8_BINARY_FROM_F32(name)                                \
+    static inline uint8_t ref_scalar_u8_##name(uint8_t a, uint8_t b) { \
+        return ref_scalar_u8_from_f32(ref_scalar_f32_##name(         \
+            (float)a, (float)b));                                   \
+    }
+
+REF_U8_UNARY_FROM_F32(acos)
+REF_U8_UNARY_FROM_F32(arccos)
+REF_U8_UNARY_FROM_F32(acosh)
+REF_U8_UNARY_FROM_F32(angle)
+REF_U8_UNARY_FROM_F32(asin)
+REF_U8_UNARY_FROM_F32(arcsin)
+REF_U8_UNARY_FROM_F32(asinh)
+REF_U8_UNARY_FROM_F32(arcsinh)
+REF_U8_UNARY_FROM_F32(atan)
+REF_U8_UNARY_FROM_F32(arctan)
+REF_U8_UNARY_FROM_F32(atanh)
+REF_U8_UNARY_FROM_F32(cbrt)
+REF_U8_UNARY_FROM_F32(cos)
+REF_U8_UNARY_FROM_F32(cosh)
+REF_U8_UNARY_FROM_F32(deg2rad)
+REF_U8_UNARY_FROM_F32(digamma)
+REF_U8_UNARY_FROM_F32(erf)
+REF_U8_UNARY_FROM_F32(erfc)
+REF_U8_UNARY_FROM_F32(erfinv)
+REF_U8_UNARY_FROM_F32(exp)
+REF_U8_UNARY_FROM_F32(exp2)
+REF_U8_UNARY_FROM_F32(expm1)
+REF_U8_UNARY_FROM_F32(i0)
+REF_U8_UNARY_FROM_F32(lgamma)
+REF_U8_UNARY_FROM_F32(log)
+REF_U8_UNARY_FROM_F32(log10)
+REF_U8_UNARY_FROM_F32(log1p)
+REF_U8_UNARY_FROM_F32(log2)
+REF_U8_UNARY_FROM_F32(isfinite)
+REF_U8_UNARY_FROM_F32(isnan)
+REF_U8_UNARY_FROM_F32(logit)
+REF_U8_UNARY_FROM_F32(log_sigmoid)
+REF_U8_UNARY_FROM_F32(gelu)
+REF_U8_UNARY_FROM_F32(elu)
+REF_U8_UNARY_FROM_F32(leaky_relu)
+REF_U8_UNARY_FROM_F32(softplus)
+REF_U8_UNARY_FROM_F32(isinf)
+REF_U8_UNARY_FROM_F32(isneginf)
+REF_U8_UNARY_FROM_F32(isposinf)
+REF_U8_UNARY_FROM_F32(nan_to_num)
+REF_U8_UNARY_FROM_F32(rad2deg)
+REF_U8_UNARY_FROM_F32(rsqrt)
+REF_U8_UNARY_FROM_F32(sigmoid)
+REF_U8_UNARY_FROM_F32(selu)
+REF_U8_UNARY_FROM_F32(relu6)
+REF_U8_UNARY_FROM_F32(hardsigmoid)
+REF_U8_UNARY_FROM_F32(silu)
+REF_U8_UNARY_FROM_F32(mish)
+REF_U8_UNARY_FROM_F32(hardswish)
+REF_U8_UNARY_FROM_F32(sin)
+REF_U8_UNARY_FROM_F32(sinc)
+REF_U8_UNARY_FROM_F32(sinh)
+REF_U8_UNARY_FROM_F32(sqrt)
+REF_U8_UNARY_FROM_F32(tan)
+REF_U8_UNARY_FROM_F32(tanh)
+
+REF_U8_BINARY_FROM_F32(atan2)
+REF_U8_BINARY_FROM_F32(heaviside)
+REF_U8_BINARY_FROM_F32(hypot)
+REF_U8_BINARY_FROM_F32(ldexp)
+REF_U8_BINARY_FROM_F32(logaddexp)
+REF_U8_BINARY_FROM_F32(logaddexp2)
+REF_U8_BINARY_FROM_F32(nextafter)
+REF_U8_BINARY_FROM_F32(pow)
+REF_U8_BINARY_FROM_F32(xlogy)
+
+#undef REF_U8_UNARY_FROM_F32
+#undef REF_U8_BINARY_FROM_F32
+
 #endif
