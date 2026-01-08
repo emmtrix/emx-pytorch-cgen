@@ -1163,7 +1163,7 @@
 | `matrix_exp` | — |
 | `matrix_exp_backward` | — |
 | `matrix_power` | — |
-| `max` | — |
+| `max` | ✅ |
 | `max_pool1d` | ✅ |
 | `max_pool1d_with_indices` | — |
 | `max_pool2d` | ✅ |
@@ -1719,5 +1719,5 @@
 
 ## Summary
 - total aten ops: 1714
-- supported by codegen: 268 / 1714 (15.6 %)
-- unsupported by codegen: 1446
+- supported by codegen: 269 / 1714 (15.7 %)
+- unsupported by codegen: 1445
