@@ -134,7 +134,7 @@
 | `ne.Scalar` | ✅ |
 | `ne.Tensor` | ✅ |
 | `neg` | ✅ |
-| `nonzero` | — |
+| `nonzero` | ✅ |
 | `permute` | ✅ |
 | `pow.Scalar` | ✅ |
 | `pow.Tensor_Scalar` | ✅ |

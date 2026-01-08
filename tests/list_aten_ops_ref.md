@@ -1270,7 +1270,7 @@
 | `nll_loss_backward` | — |
 | `nll_loss_forward` | — |
 | `nll_loss_nd` | — |
-| `nonzero` | — |
+| `nonzero` | ✅ |
 | `nonzero_numpy` | — |
 | `nonzero_static` | — |
 | `norm` | ✅ |

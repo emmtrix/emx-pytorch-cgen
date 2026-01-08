@@ -175,6 +175,10 @@ def build_supported_ops() -> dict[str, _OpSpec]:
         torch.ops.aten._cdist_forward,
         torch.ops.aten._cdist_forward.default,
     ).build()
+    registry.register_op("nonzero", kind=OpKind.NONZERO).targets(
+        torch.nonzero,
+        torch.ops.aten.nonzero,
+        torch.ops.aten.nonzero.default,
     registry.register_op("native_dropout", kind=OpKind.DROPOUT).targets(
         torch.ops.aten.native_dropout,
         torch.ops.aten.native_dropout.default,
