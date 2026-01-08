@@ -32,7 +32,7 @@ def _write_cumsum_kernel(
     output_dtype_info = _CODEGEN_DTYPES.get(output_dtype)
     if output_dtype_info is None:
         raise CodegenBackendError(
-            "codegen cumsum supports only torch.float32, torch.int8, or torch.int32"
+            "codegen cumsum supports only torch.float32, torch.int8, torch.uint8, or torch.int32"
         )
     output_c_type = output_dtype_info.c_type
     input_c_type = _input_c_type(graph_dtype.torch_dtype, graph_dtype)
