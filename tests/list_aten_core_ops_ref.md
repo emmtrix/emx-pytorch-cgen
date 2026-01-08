@@ -121,7 +121,7 @@
 | `maximum` | ✅ |
 | `mean` | ✅ |
 | `mean.dim` | ✅ |
-| `min.dim` | — |
+| `min.dim` | ✅ |
 | `minimum` | ✅ |
 | `mm` | ✅ |
 | `mul.Scalar` | ✅ |
@@ -197,5 +197,5 @@
 
 ## Summary
 - total core aten ops: 192
-- supported by codegen: 147 / 192 (76.6%)
-- unsupported by codegen: 45
+- supported by codegen: 149 / 192 (77.6%)
+- unsupported by codegen: 43
