@@ -144,43 +144,15 @@ def _native_batch_norm_legit_sample_filter(sample):
 def _as_strided_sequence(value):
     if isinstance(value, torch.Size):
         return tuple(value)
+    if isinstance(value, torch.Tensor):
+        if value.numel() == 1:
+            return (value.item(),)
+        if value.dim() != 1:
+            return None
+        return tuple(value.tolist())
     if isinstance(value, (tuple, list)):
         return tuple(value)
     return None
-
-
-def _as_strided_sample_filter(sample):
-    if not isinstance(sample.input, torch.Tensor):
-        return False
-    if len(sample.args) < 2:
-        return False
-    size = _as_strided_sequence(sample.args[0])
-    stride = _as_strided_sequence(sample.args[1])
-    if size is None or stride is None:
-        return False
-    try:
-        for item in size:
-            if isinstance(item, torch.Tensor):
-                return False
-            operator.index(item)
-        for item in stride:
-            if isinstance(item, torch.Tensor):
-                return False
-            operator.index(item)
-    except TypeError:
-        return False
-    if len(size) != len(stride):
-        return False
-    storage_offset = sample.kwargs.get("storage_offset", 0)
-    if storage_offset is None or isinstance(storage_offset, torch.Tensor):
-        return False
-    try:
-        storage_offset_value = int(operator.index(storage_offset))
-    except TypeError:
-        return False
-    if storage_offset_value < 0:
-        return False
-    return True
 
 
 def _cdist_sample_filter(sample):
@@ -827,10 +799,6 @@ CODEGEN_OP_TEST_CONFIG = {
     torch.ops.aten.arange.start_step: {
         "allowed_dtypes": (torch.float32, torch.int8, torch.int32),
         "allow_no_tensor_inputs": True,
-    },
-    torch.ops.aten.as_strided.default: {
-        "allow_non_tensor_args": False,
-        "sample_filter": _as_strided_sample_filter,
     },
     torch.ops.aten.argmax.default: {
         "allowed_dtypes": (torch.float32, torch.int8, torch.int32),
