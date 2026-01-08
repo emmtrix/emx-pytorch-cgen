@@ -919,6 +919,34 @@ class TensorOpBuilder:
             raise CodegenBackendError(
                 f"codegen {op_spec.name} expects inputs to share the graph dtype"
             )
+        if op_spec.name == "_local_scalar_dense":
+            if len(node.args) != 1:
+                raise CodegenBackendError(
+                    "codegen _local_scalar_dense expects one input"
+                )
+            if node.kwargs:
+                raise CodegenBackendError(
+                    "codegen _local_scalar_dense expects no kwargs"
+                )
+            input_shape = self._shapes[input_arg]
+            if input_shape:
+                raise CodegenBackendError(
+                    "codegen _local_scalar_dense expects a 0-d input"
+                )
+            op_node = _OpNode(
+                node=node,
+                spec=op_spec,
+                inputs=[input_arg],
+                output_shape=(),
+                params={
+                    "size": (),
+                    "view_strides": _contiguous_strides(()),
+                    "storage_offset": 0,
+                },
+            )
+            return self._finalize_node(
+                node, op_node, dtype_info, [input_shape]
+            )
         if op_spec.name == "as_strided":
             if len(node.args) > 4:
                 raise CodegenBackendError(

@@ -275,7 +275,7 @@
 | `_linalg_solve_ex` | — |
 | `_linalg_svd` | — |
 | `_list_to_tensor` | — |
-| `_local_scalar_dense` | — |
+| `_local_scalar_dense` | ✅ |
 | `_log_softmax` | ✅ |
 | `_log_softmax_backward_data` | — |
 | `_logcumsumexp` | — |
@@ -1719,5 +1719,5 @@
 
 ## Summary
 - total aten ops: 1714
-- supported by codegen: 276 / 1714 (16.1 %)
-- unsupported by codegen: 1438
+- supported by codegen: 277 / 1714 (16.2 %)
+- unsupported by codegen: 1437

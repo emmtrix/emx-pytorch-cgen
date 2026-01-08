@@ -143,7 +143,15 @@ class Compiler:
 
         def resolve_output(value: object, env: Dict[torch.fx.Node, object]) -> object:
             if isinstance(value, torch.fx.Node):
-                return env[value]
+                resolved = env[value]
+                op_node = op_node_by_node.get(value)
+                if (
+                    op_node is not None
+                    and op_node.spec.name == "_local_scalar_dense"
+                    and isinstance(resolved, torch.Tensor)
+                ):
+                    return resolved.item()
+                return resolved
             if isinstance(value, (list, tuple, immutable_list)):
                 resolved = [resolve_output(item, env) for item in value]
                 return type(value)(resolved)

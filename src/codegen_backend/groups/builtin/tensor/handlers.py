@@ -210,6 +210,8 @@ class ViewHandler(OpKindHandler):
                     "codegen flatten expects shape to be resolved"
                 )
             return tuple(size)
+        if op_node.spec.name == "_local_scalar_dense":
+            return tuple(input_shapes[0])
         raise CodegenBackendError(f"Unsupported view op: {op_node.spec.name}")
 
 
