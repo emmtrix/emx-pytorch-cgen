@@ -435,6 +435,36 @@ class Compiler:
             env[node] = indices
             return True
 
+        def _maybe_fill_sort_indices(
+            node: torch.fx.Node, env: Dict[torch.fx.Node, object]
+        ) -> bool:
+            parsed = _parse_getitem_node(node)
+            if parsed is None:
+                return False
+            source, index = parsed
+            if not isinstance(source, torch.fx.Node):
+                return False
+            op_node = op_node_by_node.get(source)
+            if op_node is None or op_node.spec.name != "sort":
+                return False
+            if index not in (1, 1.0):
+                return False
+            input_node = op_node.inputs[0]
+            input_tensor = env.get(_resolve_alias(input_node, graph.alias_map))
+            if not isinstance(input_tensor, torch.Tensor):
+                return False
+            dim_value = int(op_node.p("dim"))
+            descending = bool(op_node.p("descending", False))
+            stable = bool(op_node.p("stable", False))
+            _values, indices = torch.sort(
+                input_tensor,
+                dim=dim_value,
+                descending=descending,
+                stable=stable,
+            )
+            env[node] = indices
+            return True
+
         def compiled(*args: object, **kwargs: object) -> object:
             if kwargs:
                 placeholder_targets = [node.target for node in graph.placeholders]
@@ -576,6 +606,8 @@ class Compiler:
                     if _maybe_fill_group_norm_backward_grads(node, env):
                         continue
                     if _maybe_fill_max_pool3d_indices(node, env):
+                        continue
+                    if _maybe_fill_sort_indices(node, env):
                         continue
                     if node not in env:
                         env[node] = torch.empty(

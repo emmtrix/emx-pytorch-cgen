@@ -56,6 +56,7 @@ class OpKind(str, Enum):
     SPLIT_WITH_SIZES = "split_with_sizes"
     NONZERO = "nonzero"
     DROPOUT = "dropout"
+    SORT = "sort"
 
 
 @dataclass(frozen=True)

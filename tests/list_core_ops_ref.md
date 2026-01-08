@@ -172,7 +172,7 @@ This list shows core ATen operators, whether the codegen backend supports them, 
 | `sinh` | ✅ | 1 |
 | `slice.Tensor` | ✅ | — |
 | `slice_scatter` | — | 9 |
-| `sort` | — | 58 |
+| `sort` | ✅ | 58 |
 | `split_with_sizes` | ✅ | 4 |
 | `sqrt` | ✅ | 1 |
 | `squeeze.dim` | ✅ | — |
@@ -199,5 +199,5 @@ This list shows core ATen operators, whether the codegen backend supports them, 
 
 ## Summary
 - total core aten ops: 192
-- supported by codegen: 163 / 192 (84.9%)
-- unsupported by codegen: 29
+- supported by codegen: 164 / 192 (85.4%)
+- unsupported by codegen: 28

@@ -39,6 +39,7 @@ from codegen_backend.groups.builtin.tensor.parsing import (
     parse_linear_args,
     parse_masked_scatter_args,
     parse_select_scatter_args,
+    parse_sort_args,
     parse_resize_size,
 )
 from codegen_backend.graph import _OpNode
@@ -1222,6 +1223,45 @@ class TensorOpBuilder:
             output_shape=(),
             inplace_input=None,
             params={"dim": dim_value},
+        )
+        return self._finalize_node(
+            node, op_node, dtype_info, [input_shape]
+        )
+
+    def build_sort(
+        self, node: torch.fx.Node, op_spec: _OpSpec, dtype_info: _CodegenDType
+    ) -> _OpNode:
+        input_arg, dim_value, descending, stable = parse_sort_args(
+            op_spec.name, node
+        )
+        if not isinstance(input_arg, torch.fx.Node) or input_arg not in self._shapes:
+            raise error_expected_tensor(op_spec.name)
+        if self._dtypes[input_arg] is not dtype_info.torch_dtype:
+            raise CodegenBackendError(
+                "codegen sort expects input to match the graph dtype"
+            )
+        input_shape = self._shapes[input_arg]
+        rank = len(input_shape)
+        if rank == 0:
+            if dim_value not in (-1, 0):
+                raise CodegenBackendError("codegen sort dim is out of range")
+            dim_value = 0
+        else:
+            if dim_value < 0:
+                dim_value += rank
+            if dim_value < 0 or dim_value >= rank:
+                raise CodegenBackendError("codegen sort dim is out of range")
+        op_node = _OpNode(
+            node=node,
+            spec=op_spec,
+            inputs=[input_arg],
+            output_shape=(),
+            inplace_input=None,
+            params={
+                "dim": dim_value,
+                "descending": bool(descending),
+                "stable": bool(stable),
+            },
         )
         return self._finalize_node(
             node, op_node, dtype_info, [input_shape]

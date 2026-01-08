@@ -42,6 +42,7 @@ from codegen_backend.emitters.resize import ResizeEmitter
 from codegen_backend.emitters.scalar_tensor import ScalarTensorEmitter
 from codegen_backend.emitters.select_scatter import SelectScatterEmitter
 from codegen_backend.emitters.split_with_sizes import SplitWithSizesEmitter
+from codegen_backend.emitters.sort import SortEmitter
 from codegen_backend.emitters.view import ViewEmitter
 from codegen_backend.errors import CodegenBackendError
 from codegen_backend.graph import _GenericGraph, _OpNode
@@ -363,6 +364,20 @@ class CumsumHandler(OpKindHandler):
                 "output_dtype": graph.dtypes[op_node.node],
             },
         )
+
+    def infer_shapes(
+        self,
+        op_node: _OpNode,
+        input_shapes: Sequence[Tuple[int, ...]],
+    ) -> Tuple[int, ...]:
+        return input_shapes[0]
+
+
+class SortHandler(OpKindHandler):
+    def emit(
+        self, node_index: int, op_node: _OpNode, graph: _GenericGraph
+    ) -> List[str]:
+        return self._emit_standard(node_index, op_node, graph)
 
     def infer_shapes(
         self,
@@ -1716,6 +1731,11 @@ def build_handlers(context: TensorContext) -> Dict[OpKind, OpKindHandler]:
             CumsumEmitter(),
             builder=_build_with_dtype(context, "build_cumsum"),
         ),
+        OpKind.SORT: SortHandler(
+            context,
+            SortEmitter(),
+            builder=_build_with_dtype(context, "build_sort"),
+        ),
         OpKind.GATHER: GatherHandler(
             context,
             GatherEmitter(),
@@ -1929,6 +1949,7 @@ def build_kind_handler_registrations() -> Dict[OpKind, "KindHandlerRegistration"
         OpKind.NONZERO: KindHandlerRegistration(
             _BackendNonzeroHandler, NonzeroEmitter
         ),
+        OpKind.SORT: KindHandlerRegistration(SortHandler, SortEmitter),
     }
 
 

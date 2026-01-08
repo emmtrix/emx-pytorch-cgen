@@ -279,6 +279,7 @@ CODEGEN_ATEN_OPS = [
     torch.ops.aten.index_select.default,
     torch.ops.aten.select_scatter.default,
     torch.ops.aten.split_with_sizes.default,
+    torch.ops.aten.sort.default,
     torch.ops.aten.heaviside.default,
     torch.ops.aten.hypot.default,
     torch.ops.aten.i0.default,
