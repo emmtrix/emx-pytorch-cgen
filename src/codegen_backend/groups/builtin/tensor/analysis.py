@@ -132,6 +132,599 @@ class TensorOpBuilder:
             node, op_node, dtype_info, [input_shape]
         )
 
+    def _normalize_size_arg(
+        self, op_name: str, size: object
+    ) -> Tuple[int, ...]:
+        if isinstance(size, torch.fx.Node):
+            raise CodegenBackendError(
+                f"codegen {op_name} expects size to be a constant"
+            )
+        if isinstance(size, torch.Size):
+            size = tuple(size)
+        if isinstance(size, torch.Tensor):
+            if size.numel() == 1:
+                size = (size.item(),)
+            else:
+                if size.dim() != 1:
+                    raise CodegenBackendError(
+                        f"codegen {op_name} expects size to be a 1D tensor or scalar"
+                    )
+                size = tuple(size.tolist())
+        if isinstance(size, (tuple, list)):
+            size_tuple = tuple(size)
+        elif isinstance(size, numbers.Integral):
+            size_tuple = (int(size),)
+        else:
+            raise CodegenBackendError(
+                f"codegen {op_name} expects size to be an int or a tuple of ints"
+            )
+        try:
+            size_tuple = tuple(int(operator.index(item)) for item in size_tuple)
+        except TypeError as exc:
+            raise CodegenBackendError(
+                f"codegen {op_name} expects size to be an int or a tuple of ints"
+            ) from exc
+        if any(dim < 0 for dim in size_tuple):
+            raise CodegenBackendError(
+                f"codegen {op_name} expects non-negative size values"
+            )
+        return size_tuple
+
+    def build_random(
+        self, node: torch.fx.Node, op_spec: _OpSpec, dtype_info: _CodegenDType
+    ) -> _OpNode:
+        if not node.args:
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} expects size arguments"
+            )
+        size_arg = node.args[0] if len(node.args) == 1 else node.args
+        size_tuple = self._normalize_size_arg(op_spec.name, size_arg)
+        kwargs = dict(node.kwargs)
+        extra = set(kwargs) - {
+            "dtype",
+            "layout",
+            "device",
+            "pin_memory",
+            "requires_grad",
+        }
+        if extra:
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} got unexpected kwargs: {sorted(extra)}"
+            )
+        if kwargs.get("layout") is not None:
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} expects layout to be None"
+            )
+        device = kwargs.get("device")
+        if device is not None and device != "cpu" and device != torch.device("cpu"):
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} expects device to be None or cpu"
+            )
+        pin_memory = kwargs.get("pin_memory")
+        if pin_memory not in (None, False):
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} expects pin_memory to be False"
+            )
+        requires_grad = kwargs.get("requires_grad")
+        if requires_grad not in (None, False):
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} expects requires_grad to be False"
+            )
+        dtype_value = kwargs.get("dtype")
+        if dtype_value is None:
+            dtype_value = dtype_info.torch_dtype
+        if dtype_value not in (torch.float32, torch.float64):
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} supports only torch.float32 or torch.float64 tensors"
+            )
+        if dtype_value is not dtype_info.torch_dtype:
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} expects dtype to match the graph dtype"
+            )
+        op_node = _OpNode(
+            node=node,
+            spec=op_spec,
+            inputs=[],
+            output_shape=(),
+            params={"size": size_tuple},
+        )
+        op_node.output_shape = size_tuple
+        self._shapes[node] = size_tuple
+        self._dtypes[node] = dtype_value
+        self._strides[node] = _contiguous_strides(size_tuple)
+        return op_node
+
+    def _normalize_normalized_shape(
+        self, op_name: str, normalized_shape: object, input_shape: Tuple[int, ...]
+    ) -> Tuple[int, ...]:
+        if isinstance(normalized_shape, torch.fx.Node):
+            raise CodegenBackendError(
+                f"codegen {op_name} expects normalized_shape to be a constant"
+            )
+        if isinstance(normalized_shape, torch.Size):
+            normalized_shape = tuple(normalized_shape)
+        if isinstance(normalized_shape, numbers.Integral):
+            normalized_shape_tuple = (int(normalized_shape),)
+        elif isinstance(normalized_shape, (tuple, list)):
+            try:
+                normalized_shape_tuple = tuple(
+                    int(operator.index(item)) for item in normalized_shape
+                )
+            except TypeError as exc:
+                raise CodegenBackendError(
+                    f"codegen {op_name} expects normalized_shape to be a tuple of ints"
+                ) from exc
+        else:
+            raise CodegenBackendError(
+                f"codegen {op_name} expects normalized_shape to be a tuple of ints"
+            )
+        if not normalized_shape_tuple:
+            raise CodegenBackendError(
+                f"codegen {op_name} expects normalized_shape to be non-empty"
+            )
+        if any(dim <= 0 for dim in normalized_shape_tuple):
+            raise CodegenBackendError(
+                f"codegen {op_name} expects normalized_shape values to be positive"
+            )
+        if len(normalized_shape_tuple) > len(input_shape):
+            raise CodegenBackendError(
+                f"codegen {op_name} expects normalized_shape rank <= input rank"
+            )
+        if tuple(input_shape[-len(normalized_shape_tuple) :]) != normalized_shape_tuple:
+            raise CodegenBackendError(
+                f"codegen {op_name} expects normalized_shape to match input shape tail"
+            )
+        return normalized_shape_tuple
+
+    def build_native_layer_norm(
+        self, node: torch.fx.Node, op_spec: _OpSpec, dtype_info: _CodegenDType
+    ) -> _OpNode:
+        if len(node.args) < 5:
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} expects five inputs"
+            )
+        if node.kwargs:
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} expects positional args only"
+            )
+        input_arg, normalized_shape, weight, bias, eps = node.args[:5]
+        if not isinstance(input_arg, torch.fx.Node) or input_arg not in self._shapes:
+            raise error_expected_tensor(op_spec.name)
+        if dtype_info.torch_dtype not in (torch.float32, torch.float64):
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} supports only torch.float32 or torch.float64"
+            )
+        if self._dtypes[input_arg] not in (torch.float32, torch.float64):
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} supports only torch.float32 or torch.float64"
+            )
+        input_shape = self._shapes[input_arg]
+        normalized_shape_tuple = self._normalize_normalized_shape(
+            op_spec.name, normalized_shape, input_shape
+        )
+        weight_node = None
+        bias_node = None
+        if weight is not None:
+            if not isinstance(weight, torch.fx.Node) or weight not in self._shapes:
+                raise error_expected_tensor(op_spec.name)
+            weight_node = weight
+            if self._shapes[weight_node] != normalized_shape_tuple:
+                raise CodegenBackendError(
+                    f"codegen {op_spec.name} expects weight shape to match normalized_shape"
+                )
+        if bias is not None:
+            if not isinstance(bias, torch.fx.Node) or bias not in self._shapes:
+                raise error_expected_tensor(op_spec.name)
+            bias_node = bias
+            if self._shapes[bias_node] != normalized_shape_tuple:
+                raise CodegenBackendError(
+                    f"codegen {op_spec.name} expects bias shape to match normalized_shape"
+                )
+        from codegen_backend.emitters.base import _is_contiguous
+
+        if not _is_contiguous(input_shape, self._strides[input_arg]):
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} requires contiguous input"
+            )
+        for name, node_arg in (("weight", weight_node), ("bias", bias_node)):
+            if node_arg is None:
+                continue
+            if not _is_contiguous(self._shapes[node_arg], self._strides[node_arg]):
+                raise CodegenBackendError(
+                    f"codegen {op_spec.name} requires contiguous {name}"
+                )
+            if self._dtypes[node_arg] is not dtype_info.torch_dtype:
+                raise CodegenBackendError(
+                    f"codegen {op_spec.name} expects {name} to match graph dtype"
+                )
+        eps_value = float(resolve_scalar_arg(op_spec.name, eps, self._scalar_values))
+        inputs = [input_arg]
+        if weight_node is not None:
+            inputs.append(weight_node)
+        if bias_node is not None:
+            inputs.append(bias_node)
+        op_node = _OpNode(
+            node=node,
+            spec=op_spec,
+            inputs=inputs,
+            output_shape=(),
+            params={
+                "normalized_shape": normalized_shape_tuple,
+                "eps": eps_value,
+                "has_weight": weight_node is not None,
+                "has_bias": bias_node is not None,
+            },
+        )
+        return self._finalize_node(
+            node, op_node, dtype_info, [self._shapes[arg] for arg in inputs]
+        )
+
+    def build_native_layer_norm_backward(
+        self, node: torch.fx.Node, op_spec: _OpSpec, dtype_info: _CodegenDType
+    ) -> _OpNode:
+        if len(node.args) < 8:
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} expects eight inputs"
+            )
+        if node.kwargs:
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} expects positional args only"
+            )
+        (
+            grad_output,
+            input_arg,
+            normalized_shape,
+            mean,
+            rstd,
+            weight,
+            bias,
+            output_mask,
+        ) = node.args[:8]
+        for arg in (grad_output, input_arg, mean, rstd):
+            if not isinstance(arg, torch.fx.Node) or arg not in self._shapes:
+                raise error_expected_tensor(op_spec.name)
+        if dtype_info.torch_dtype not in (torch.float32, torch.float64):
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} supports only torch.float32 or torch.float64"
+            )
+        for arg in (grad_output, input_arg, mean, rstd):
+            if self._dtypes[arg] is not dtype_info.torch_dtype:
+                raise CodegenBackendError(
+                    f"codegen {op_spec.name} expects inputs to share the graph dtype"
+                )
+        input_shape = self._shapes[input_arg]
+        if self._shapes[grad_output] != input_shape:
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} expects grad_output to match input shape"
+            )
+        normalized_shape_tuple = self._normalize_normalized_shape(
+            op_spec.name, normalized_shape, input_shape
+        )
+        expected_stat_shape = input_shape[: -len(normalized_shape_tuple)] + (
+            1,
+        ) * len(normalized_shape_tuple)
+        if self._shapes[mean] != expected_stat_shape or self._shapes[rstd] != expected_stat_shape:
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} expects mean and rstd to match input shape with normalized dims set to 1"
+            )
+        weight_node = None
+        bias_node = None
+        if weight is not None:
+            if not isinstance(weight, torch.fx.Node) or weight not in self._shapes:
+                raise error_expected_tensor(op_spec.name)
+            weight_node = weight
+            if self._shapes[weight_node] != normalized_shape_tuple:
+                raise CodegenBackendError(
+                    f"codegen {op_spec.name} expects weight shape to match normalized_shape"
+                )
+        if bias is not None:
+            if not isinstance(bias, torch.fx.Node) or bias not in self._shapes:
+                raise error_expected_tensor(op_spec.name)
+            bias_node = bias
+            if self._shapes[bias_node] != normalized_shape_tuple:
+                raise CodegenBackendError(
+                    f"codegen {op_spec.name} expects bias shape to match normalized_shape"
+                )
+        if isinstance(output_mask, torch.fx.Node):
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} expects output_mask to be constant"
+            )
+        if not isinstance(output_mask, (tuple, list)) or len(output_mask) != 3:
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} expects output_mask to be a bool[3]"
+            )
+        output_mask_tuple = tuple(bool(item) for item in output_mask)
+        from codegen_backend.emitters.base import _is_contiguous
+
+        for name, arg in (
+            ("grad_output", grad_output),
+            ("input", input_arg),
+            ("mean", mean),
+            ("rstd", rstd),
+        ):
+            if not _is_contiguous(self._shapes[arg], self._strides[arg]):
+                raise CodegenBackendError(
+                    f"codegen {op_spec.name} requires contiguous {name}"
+                )
+        for name, node_arg in (("weight", weight_node), ("bias", bias_node)):
+            if node_arg is None:
+                continue
+            if not _is_contiguous(self._shapes[node_arg], self._strides[node_arg]):
+                raise CodegenBackendError(
+                    f"codegen {op_spec.name} requires contiguous {name}"
+                )
+            if self._dtypes[node_arg] is not dtype_info.torch_dtype:
+                raise CodegenBackendError(
+                    f"codegen {op_spec.name} expects {name} to match graph dtype"
+                )
+        inputs = [grad_output, input_arg, mean, rstd]
+        if weight_node is not None:
+            inputs.append(weight_node)
+        if bias_node is not None:
+            inputs.append(bias_node)
+        op_node = _OpNode(
+            node=node,
+            spec=op_spec,
+            inputs=inputs,
+            output_shape=(),
+            params={
+                "normalized_shape": normalized_shape_tuple,
+                "has_weight": weight_node is not None,
+                "has_bias": bias_node is not None,
+                "output_mask": output_mask_tuple,
+            },
+        )
+        return self._finalize_node(
+            node, op_node, dtype_info, [self._shapes[arg] for arg in inputs]
+        )
+
+    def build_native_group_norm(
+        self, node: torch.fx.Node, op_spec: _OpSpec, dtype_info: _CodegenDType
+    ) -> _OpNode:
+        if len(node.args) < 8:
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} expects eight inputs"
+            )
+        if node.kwargs:
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} expects positional args only"
+            )
+        (
+            input_arg,
+            weight,
+            bias,
+            n_arg,
+            c_arg,
+            hxw_arg,
+            group_arg,
+            eps,
+        ) = node.args[:8]
+        if not isinstance(input_arg, torch.fx.Node) or input_arg not in self._shapes:
+            raise error_expected_tensor(op_spec.name)
+        if dtype_info.torch_dtype not in (torch.float32, torch.float64):
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} supports only torch.float32 or torch.float64"
+            )
+        if self._dtypes[input_arg] not in (torch.float32, torch.float64):
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} supports only torch.float32 or torch.float64"
+            )
+        input_shape = self._shapes[input_arg]
+        if len(input_shape) < 2:
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} expects inputs with rank >= 2"
+            )
+        n_value = int(resolve_scalar_arg(op_spec.name, n_arg, self._scalar_values))
+        c_value = int(resolve_scalar_arg(op_spec.name, c_arg, self._scalar_values))
+        hxw_value = int(resolve_scalar_arg(op_spec.name, hxw_arg, self._scalar_values))
+        group_value = int(
+            resolve_scalar_arg(op_spec.name, group_arg, self._scalar_values)
+        )
+        if n_value != input_shape[0] or c_value != input_shape[1]:
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} expects N and C to match input shape"
+            )
+        spatial = 1
+        for dim in input_shape[2:]:
+            spatial *= dim
+        if spatial != hxw_value:
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} expects HxW to match input spatial size"
+            )
+        if group_value <= 0 or c_value % group_value != 0:
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} expects groups to divide channels"
+            )
+        weight_node = None
+        bias_node = None
+        if weight is not None:
+            if not isinstance(weight, torch.fx.Node) or weight not in self._shapes:
+                raise error_expected_tensor(op_spec.name)
+            weight_node = weight
+            if self._shapes[weight_node] != (c_value,):
+                raise CodegenBackendError(
+                    f"codegen {op_spec.name} expects weight shape to match channels"
+                )
+        if bias is not None:
+            if not isinstance(bias, torch.fx.Node) or bias not in self._shapes:
+                raise error_expected_tensor(op_spec.name)
+            bias_node = bias
+            if self._shapes[bias_node] != (c_value,):
+                raise CodegenBackendError(
+                    f"codegen {op_spec.name} expects bias shape to match channels"
+                )
+        from codegen_backend.emitters.base import _is_contiguous
+
+        if not _is_contiguous(input_shape, self._strides[input_arg]):
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} requires contiguous input"
+            )
+        for name, node_arg in (("weight", weight_node), ("bias", bias_node)):
+            if node_arg is None:
+                continue
+            if not _is_contiguous(self._shapes[node_arg], self._strides[node_arg]):
+                raise CodegenBackendError(
+                    f"codegen {op_spec.name} requires contiguous {name}"
+                )
+            if self._dtypes[node_arg] is not dtype_info.torch_dtype:
+                raise CodegenBackendError(
+                    f"codegen {op_spec.name} expects {name} to match graph dtype"
+                )
+        eps_value = float(resolve_scalar_arg(op_spec.name, eps, self._scalar_values))
+        inputs = [input_arg]
+        if weight_node is not None:
+            inputs.append(weight_node)
+        if bias_node is not None:
+            inputs.append(bias_node)
+        op_node = _OpNode(
+            node=node,
+            spec=op_spec,
+            inputs=inputs,
+            output_shape=(),
+            params={
+                "groups": group_value,
+                "eps": eps_value,
+                "has_weight": weight_node is not None,
+                "has_bias": bias_node is not None,
+                "N": n_value,
+                "C": c_value,
+                "HxW": hxw_value,
+            },
+        )
+        return self._finalize_node(
+            node, op_node, dtype_info, [self._shapes[arg] for arg in inputs]
+        )
+
+    def build_native_group_norm_backward(
+        self, node: torch.fx.Node, op_spec: _OpSpec, dtype_info: _CodegenDType
+    ) -> _OpNode:
+        if len(node.args) < 10:
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} expects ten inputs"
+            )
+        if node.kwargs:
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} expects positional args only"
+            )
+        (
+            grad_output,
+            input_arg,
+            mean,
+            rstd,
+            weight,
+            n_arg,
+            c_arg,
+            hxw_arg,
+            group_arg,
+            output_mask,
+        ) = node.args[:10]
+        for arg in (grad_output, input_arg, mean, rstd):
+            if not isinstance(arg, torch.fx.Node) or arg not in self._shapes:
+                raise error_expected_tensor(op_spec.name)
+        if dtype_info.torch_dtype not in (torch.float32, torch.float64):
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} supports only torch.float32 or torch.float64"
+            )
+        for arg in (grad_output, input_arg, mean, rstd):
+            if self._dtypes[arg] is not dtype_info.torch_dtype:
+                raise CodegenBackendError(
+                    f"codegen {op_spec.name} expects inputs to share the graph dtype"
+                )
+        input_shape = self._shapes[input_arg]
+        if self._shapes[grad_output] != input_shape:
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} expects grad_output to match input shape"
+            )
+        n_value = int(resolve_scalar_arg(op_spec.name, n_arg, self._scalar_values))
+        c_value = int(resolve_scalar_arg(op_spec.name, c_arg, self._scalar_values))
+        hxw_value = int(resolve_scalar_arg(op_spec.name, hxw_arg, self._scalar_values))
+        group_value = int(
+            resolve_scalar_arg(op_spec.name, group_arg, self._scalar_values)
+        )
+        if n_value != input_shape[0] or c_value != input_shape[1]:
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} expects N and C to match input shape"
+            )
+        spatial = 1
+        for dim in input_shape[2:]:
+            spatial *= dim
+        if spatial != hxw_value:
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} expects HxW to match input spatial size"
+            )
+        if group_value <= 0 or c_value % group_value != 0:
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} expects groups to divide channels"
+            )
+        if self._shapes[mean] != (n_value, group_value) or self._shapes[rstd] != (
+            n_value,
+            group_value,
+        ):
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} expects mean and rstd to have shape (N, group)"
+            )
+        weight_node = None
+        if weight is not None:
+            if not isinstance(weight, torch.fx.Node) or weight not in self._shapes:
+                raise error_expected_tensor(op_spec.name)
+            weight_node = weight
+            if self._shapes[weight_node] != (c_value,):
+                raise CodegenBackendError(
+                    f"codegen {op_spec.name} expects weight shape to match channels"
+                )
+        if isinstance(output_mask, torch.fx.Node):
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} expects output_mask to be constant"
+            )
+        if not isinstance(output_mask, (tuple, list)) or len(output_mask) != 3:
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} expects output_mask to be a bool[3]"
+            )
+        output_mask_tuple = tuple(bool(item) for item in output_mask)
+        from codegen_backend.emitters.base import _is_contiguous
+
+        for name, arg in (
+            ("grad_output", grad_output),
+            ("input", input_arg),
+            ("mean", mean),
+            ("rstd", rstd),
+        ):
+            if not _is_contiguous(self._shapes[arg], self._strides[arg]):
+                raise CodegenBackendError(
+                    f"codegen {op_spec.name} requires contiguous {name}"
+                )
+        if weight_node is not None:
+            if not _is_contiguous(
+                self._shapes[weight_node], self._strides[weight_node]
+            ):
+                raise CodegenBackendError(
+                    f"codegen {op_spec.name} requires contiguous weight"
+                )
+            if self._dtypes[weight_node] is not dtype_info.torch_dtype:
+                raise CodegenBackendError(
+                    f"codegen {op_spec.name} expects weight to match graph dtype"
+                )
+        inputs = [grad_output, input_arg, mean, rstd]
+        if weight_node is not None:
+            inputs.append(weight_node)
+        op_node = _OpNode(
+            node=node,
+            spec=op_spec,
+            inputs=inputs,
+            output_shape=(),
+            params={
+                "groups": group_value,
+                "has_weight": weight_node is not None,
+                "N": n_value,
+                "C": c_value,
+                "HxW": hxw_value,
+                "output_mask": output_mask_tuple,
+            },
+        )
+        return self._finalize_node(
+            node, op_node, dtype_info, [self._shapes[arg] for arg in inputs]
+        )
+
     def build_batch_norm(
         self, node: torch.fx.Node, op_spec: _OpSpec, dtype_info: _CodegenDType
     ) -> _OpNode:

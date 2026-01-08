@@ -184,6 +184,26 @@ def build_supported_ops() -> dict[str, _OpSpec]:
         torch.ops.aten._native_batch_norm_legit_no_training,
         torch.ops.aten._native_batch_norm_legit_no_training.default,
     ).build()
+    registry.register_op("native_layer_norm", kind=OpKind.LAYER_NORM).targets(
+        torch.ops.aten.native_layer_norm,
+        torch.ops.aten.native_layer_norm.default,
+    ).build()
+    registry.register_op(
+        "native_layer_norm_backward", kind=OpKind.LAYER_NORM_BACKWARD
+    ).targets(
+        torch.ops.aten.native_layer_norm_backward,
+        torch.ops.aten.native_layer_norm_backward.default,
+    ).build()
+    registry.register_op("native_group_norm", kind=OpKind.GROUP_NORM).targets(
+        torch.ops.aten.native_group_norm,
+        torch.ops.aten.native_group_norm.default,
+    ).build()
+    registry.register_op(
+        "native_group_norm_backward", kind=OpKind.GROUP_NORM_BACKWARD
+    ).targets(
+        torch.ops.aten.native_group_norm_backward,
+        torch.ops.aten.native_group_norm_backward.default,
+    ).build()
     registry.register_op("_pdist_forward", kind=OpKind.PDIST).targets(
         torch.ops.aten._pdist_forward,
         torch.ops.aten._pdist_forward.default,
@@ -200,6 +220,14 @@ def build_supported_ops() -> dict[str, _OpSpec]:
     registry.register_op("native_dropout", kind=OpKind.DROPOUT).targets(
         torch.ops.aten.native_dropout,
         torch.ops.aten.native_dropout.default,
+    ).build()
+    registry.register_op("rand", kind=OpKind.RANDOM).targets(
+        torch.ops.aten.rand,
+        torch.ops.aten.rand.default,
+    ).build()
+    registry.register_op("randn", kind=OpKind.RANDOM).targets(
+        torch.ops.aten.randn,
+        torch.ops.aten.randn.default,
     ).build()
 
     return registry.build()

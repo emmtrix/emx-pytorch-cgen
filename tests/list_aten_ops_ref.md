@@ -1169,9 +1169,9 @@
 | `max_pool2d` | ✅ |
 | `max_pool2d_backward` | — |
 | `max_pool2d_with_indices` | — |
-| `max_pool2d_with_indices_backward` | — |
+| `max_pool2d_with_indices_backward` | ✅ |
 | `max_pool3d` | — |
-| `max_pool3d_with_indices` | — |
+| `max_pool3d_with_indices` | ✅ |
 | `max_pool3d_with_indices_backward` | — |
 | `max_unpool2d` | — |
 | `max_unpool3d` | — |
@@ -1244,10 +1244,10 @@
 | `native_channel_shuffle` | — |
 | `native_dropout` | ✅ |
 | `native_dropout_backward` | — |
-| `native_group_norm` | — |
-| `native_group_norm_backward` | — |
-| `native_layer_norm` | — |
-| `native_layer_norm_backward` | — |
+| `native_group_norm` | ✅ |
+| `native_group_norm_backward` | ✅ |
+| `native_layer_norm` | ✅ |
+| `native_layer_norm_backward` | ✅ |
 | `native_norm` | — |
 | `ne` | ✅ |
 | `ne_` | — |
@@ -1345,11 +1345,11 @@
 | `rad2deg` | ✅ |
 | `rad2deg_` | ✅ |
 | `radians` | — |
-| `rand` | — |
+| `rand` | ✅ |
 | `rand_like` | — |
 | `randint` | — |
 | `randint_like` | — |
-| `randn` | — |
+| `randn` | ✅ |
 | `randn_like` | — |
 | `random` | — |
 | `random_` | — |
@@ -1719,5 +1719,5 @@
 
 ## Summary
 - total aten ops: 1714
-- supported by codegen: 285 / 1714 (16.6 %)
-- unsupported by codegen: 1429
+- supported by codegen: 293 / 1714 (17.1 %)
+- unsupported by codegen: 1421

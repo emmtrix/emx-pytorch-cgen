@@ -116,8 +116,8 @@
 | `masked_scatter` | ✅ |
 | `max.dim` | ✅ |
 | `max_pool2d_with_indices` | — |
-| `max_pool2d_with_indices_backward` | — |
-| `max_pool3d_with_indices` | — |
+| `max_pool2d_with_indices_backward` | ✅ |
+| `max_pool3d_with_indices` | ✅ |
 | `maximum` | ✅ |
 | `mean` | ✅ |
 | `mean.dim` | ✅ |
@@ -127,10 +127,10 @@
 | `mul.Scalar` | ✅ |
 | `mul.Tensor` | ✅ |
 | `native_dropout` | ✅ |
-| `native_group_norm` | — |
-| `native_group_norm_backward` | — |
-| `native_layer_norm` | — |
-| `native_layer_norm_backward` | — |
+| `native_group_norm` | ✅ |
+| `native_group_norm_backward` | ✅ |
+| `native_layer_norm` | ✅ |
+| `native_layer_norm_backward` | ✅ |
 | `ne.Scalar` | ✅ |
 | `ne.Tensor` | ✅ |
 | `neg` | ✅ |
@@ -141,8 +141,8 @@
 | `pow.Tensor_Tensor` | ✅ |
 | `prod` | ✅ |
 | `prod.dim_int` | ✅ |
-| `rand` | — |
-| `randn` | — |
+| `rand` | ✅ |
+| `randn` | ✅ |
 | `randperm` | — |
 | `reciprocal` | ✅ |
 | `reflection_pad1d` | — |
@@ -197,5 +197,5 @@
 
 ## Summary
 - total core aten ops: 192
-- supported by codegen: 155 / 192 (80.7%)
-- unsupported by codegen: 37
+- supported by codegen: 163 / 192 (84.9%)
+- unsupported by codegen: 29

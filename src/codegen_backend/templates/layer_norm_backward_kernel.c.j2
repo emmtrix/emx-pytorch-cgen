@@ -1,0 +1,48 @@
+{{ signature }}
+    const int64_t outer_size = {{ outer_size }};
+    const int64_t inner_size = {{ inner_size }};
+    const {{ c_type }} *grad_ptr = &grad_output{{ grad_zero_indices }};
+    const {{ c_type }} *input_ptr = &input{{ input_zero_indices }};
+    const {{ c_type }} *mean_ptr = &mean{{ mean_zero_indices }};
+    const {{ c_type }} *rstd_ptr = &rstd{{ rstd_zero_indices }};
+    {{ c_type }} *out_ptr = &out{{ output_zero_indices }};
+{% if has_weight %}
+    const {{ c_type }} *weight_ptr = &weight{{ weight_zero_indices }};
+{% endif %}
+{% if has_bias %}
+    (void)bias;
+{% endif %}
+    for (int64_t outer = 0; outer < outer_size; ++outer) {
+        {{ c_type }} mean = mean_ptr[outer];
+        {{ c_type }} rstd = rstd_ptr[outer];
+        {{ c_type }} sum1 = 0;
+        {{ c_type }} sum2 = 0;
+        for (int64_t inner = 0; inner < inner_size; ++inner) {
+            int64_t idx = outer * inner_size + inner;
+            {{ c_type }} dy = grad_ptr[idx];
+{% if has_weight %}
+            {{ c_type }} w = weight_ptr[inner];
+{% else %}
+            {{ c_type }} w = 1;
+{% endif %}
+            {{ c_type }} x = input_ptr[idx];
+            {{ c_type }} dxhat = dy * w;
+            sum1 += dxhat;
+            sum2 += dxhat * (x - mean);
+        }
+        {{ c_type }} inv_inner = ({{ c_type }})1 / ({{ c_type }})inner_size;
+        for (int64_t inner = 0; inner < inner_size; ++inner) {
+            int64_t idx = outer * inner_size + inner;
+            {{ c_type }} dy = grad_ptr[idx];
+{% if has_weight %}
+            {{ c_type }} w = weight_ptr[inner];
+{% else %}
+            {{ c_type }} w = 1;
+{% endif %}
+            {{ c_type }} x = input_ptr[idx];
+            {{ c_type }} dxhat = dy * w;
+            {{ c_type }} term = (dxhat - sum1 * inv_inner - (x - mean) * rstd * rstd * sum2 * inv_inner);
+            out_ptr[idx] = term * rstd;
+        }
+    }
+}
