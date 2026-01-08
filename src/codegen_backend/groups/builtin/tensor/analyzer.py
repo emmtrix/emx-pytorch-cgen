@@ -238,15 +238,13 @@ class TensorAnalyzer(RegistryGroupAnalyzer):
             torch.ops.aten._embedding_bag,
             torch.ops.aten._embedding_bag.default,
             torch.ops.aten.max.dim,
+            torch.ops.aten.min.dim,
             torch.ops.aten.native_dropout,
             torch.ops.aten.native_dropout.default,
         }:
             raise CodegenBackendError(
-                "codegen backend supports getitem only for _native_batch_norm_legit* ops, _embedding_bag, native_dropout, or max.dim"
-            torch.ops.aten.min.dim,
-        }:
-            raise CodegenBackendError(
-                "codegen backend supports getitem only for _native_batch_norm_legit* ops, _embedding_bag, max.dim, or min.dim"
+                "codegen backend supports getitem only for _native_batch_norm_legit* "
+                "ops, _embedding_bag, native_dropout, max.dim, or min.dim"
             )
         if source.target in {torch.ops.aten.max.dim, torch.ops.aten.min.dim}:
             if index in (0, 0.0):

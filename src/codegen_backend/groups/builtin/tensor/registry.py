@@ -196,6 +196,7 @@ def build_supported_ops() -> dict[str, _OpSpec]:
         torch.nonzero,
         torch.ops.aten.nonzero,
         torch.ops.aten.nonzero.default,
+    ).build()
     registry.register_op("native_dropout", kind=OpKind.DROPOUT).targets(
         torch.ops.aten.native_dropout,
         torch.ops.aten.native_dropout.default,

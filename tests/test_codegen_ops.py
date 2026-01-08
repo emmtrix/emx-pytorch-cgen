@@ -116,6 +116,38 @@ def _sample_matches_constraints(sample, dtype, constraints):
     return True
 
 
+def _addmm_like_scalar_is_integer(value):
+    if value is None:
+        return True
+    if isinstance(value, torch.Tensor):
+        if value.numel() != 1:
+            return False
+        value = value.item()
+    try:
+        float_value = float(value)
+    except (TypeError, ValueError):
+        return False
+    return float_value.is_integer()
+
+
+def _addmm_like_sample_filter(sample):
+    tensors = _extract_tensors(sample)
+    if not tensors:
+        return True
+    dtype = tensors[0].dtype
+    if dtype not in (torch.int8, torch.uint8, torch.uint32, torch.int32, torch.bool):
+        return True
+    beta = sample.kwargs.get("beta")
+    alpha = sample.kwargs.get("alpha")
+    if beta is None and len(sample.args) > 2:
+        beta = sample.args[2]
+    if alpha is None and len(sample.args) > 3:
+        alpha = sample.args[3]
+    return _addmm_like_scalar_is_integer(alpha) and _addmm_like_scalar_is_integer(
+        beta
+    )
+
+
 def _iter_supported_samples(op, device, dtype, constraints):
     for sample in op.sample_inputs(device, dtype):
         if sample.kwargs and not constraints["allow_kwargs"]:
@@ -724,12 +756,23 @@ CODEGEN_OP_TEST_CONFIG = {
         "requires_contiguous": True,
     },
     torch.ops.aten.resize_.default: {},
+    torch.ops.aten.addmm.default: {
+        "sample_filter": _addmm_like_sample_filter,
+    },
     torch.ops.aten.addbmm.default: {
         "rtol": 2e-4,
         "atol": 2e-5,
+        "sample_filter": _addmm_like_sample_filter,
+    },
+    torch.ops.aten.addmv.default: {
+        "sample_filter": _addmm_like_sample_filter,
     },
     torch.ops.aten.addr.default: {
         "equal_nan": True,
+        "sample_filter": _addmm_like_sample_filter,
+    },
+    torch.ops.aten.conj_physical.default: {
+        "allowed_dtypes": (torch.float32, torch.int8, torch.int32, torch.bool),
     },
 }
 DEFAULT_CONSTRAINTS = {
@@ -784,7 +827,9 @@ class TestCodegenOpLists(TestCase):
 
 
 def _constraints_for_codegen(aten_overload):
-    return DEFAULT_CONSTRAINTS.copy()
+    constraints = DEFAULT_CONSTRAINTS.copy()
+    constraints.update(CODEGEN_OP_TEST_CONFIG.get(aten_overload, {}))
+    return constraints
 
 
 def _sample_to_inputs(sample, constraints):
