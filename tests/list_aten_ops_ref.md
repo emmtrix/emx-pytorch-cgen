@@ -1179,7 +1179,7 @@
 | `mean` | ✅ |
 | `median` | — |
 | `meshgrid` | — |
-| `min` | — |
+| `min` | ✅ |
 | `minimum` | ✅ |
 | `miopen_batch_norm` | — |
 | `miopen_batch_norm_backward` | — |
@@ -1242,7 +1242,7 @@
 | `native_batch_norm` | — |
 | `native_batch_norm_backward` | — |
 | `native_channel_shuffle` | — |
-| `native_dropout` | — |
+| `native_dropout` | ✅ |
 | `native_dropout_backward` | — |
 | `native_group_norm` | — |
 | `native_group_norm_backward` | — |
@@ -1270,7 +1270,7 @@
 | `nll_loss_backward` | — |
 | `nll_loss_forward` | — |
 | `nll_loss_nd` | — |
-| `nonzero` | — |
+| `nonzero` | ✅ |
 | `nonzero_numpy` | — |
 | `nonzero_static` | — |
 | `norm` | ✅ |
@@ -1378,7 +1378,7 @@
 | `rename_` | — |
 | `renorm` | — |
 | `renorm_` | — |
-| `repeat` | — |
+| `repeat` | ✅ |
 | `repeat_interleave` | — |
 | `replace` | — |
 | `replication_pad1d` | — |
@@ -1565,7 +1565,7 @@
 | `special_zeta` | — |
 | `split` | — |
 | `split_copy` | — |
-| `split_with_sizes` | — |
+| `split_with_sizes` | ✅ |
 | `split_with_sizes_copy` | — |
 | `splitlines` | — |
 | `sqrt` | ✅ |

@@ -21,6 +21,7 @@ from codegen_backend.emitters.col2im import Col2imEmitter
 from codegen_backend.emitters.concat import ConcatEmitter
 from codegen_backend.emitters.cumsum import CumsumEmitter
 from codegen_backend.emitters.diagonal import DiagonalEmitter
+from codegen_backend.emitters.dropout import DropoutEmitter
 from codegen_backend.emitters.empty_strided import EmptyStridedEmitter
 from codegen_backend.emitters.flip import FlipEmitter
 from codegen_backend.emitters.gather import GatherEmitter
@@ -29,10 +30,13 @@ from codegen_backend.emitters.index_select import IndexSelectEmitter
 from codegen_backend.emitters.linear import LinearEmitter
 from codegen_backend.emitters.matmul import MatmulEmitter
 from codegen_backend.emitters.masked_scatter import MaskedScatterEmitter
+from codegen_backend.emitters.nonzero import NonzeroEmitter
 from codegen_backend.emitters.pad import PadEmitter
 from codegen_backend.emitters.pdist import PdistEmitter
+from codegen_backend.emitters.repeat import RepeatEmitter
 from codegen_backend.emitters.resize import ResizeEmitter
 from codegen_backend.emitters.select_scatter import SelectScatterEmitter
+from codegen_backend.emitters.split_with_sizes import SplitWithSizesEmitter
 from codegen_backend.emitters.view import ViewEmitter
 from codegen_backend.errors import CodegenBackendError
 from codegen_backend.graph import _GenericGraph, _OpNode
@@ -139,6 +143,20 @@ class FlipHandler(OpKindHandler):
         return input_shapes[0]
 
 
+class DropoutHandler(OpKindHandler):
+    def emit(
+        self, node_index: int, op_node: _OpNode, graph: _GenericGraph
+    ) -> List[str]:
+        return self._emit_standard(node_index, op_node, graph)
+
+    def infer_shapes(
+        self,
+        op_node: _OpNode,
+        input_shapes: Sequence[Tuple[int, ...]],
+    ) -> Tuple[int, ...]:
+        return input_shapes[0]
+
+
 class PadHandler(OpKindHandler):
     def emit(
         self, node_index: int, op_node: _OpNode, graph: _GenericGraph
@@ -214,6 +232,31 @@ class ViewHandler(OpKindHandler):
         if op_node.spec.name == "_local_scalar_dense":
             return tuple(input_shapes[0])
         raise CodegenBackendError(f"Unsupported view op: {op_node.spec.name}")
+
+
+class RepeatHandler(OpKindHandler):
+    def emit(
+        self, node_index: int, op_node: _OpNode, graph: _GenericGraph
+    ) -> List[str]:
+        return self._emit_standard(node_index, op_node, graph)
+
+    def infer_shapes(
+        self,
+        op_node: _OpNode,
+        input_shapes: Sequence[Tuple[int, ...]],
+    ) -> Tuple[int, ...]:
+        repeats = op_node.p("repeats", ())
+        input_shape = input_shapes[0]
+        if len(repeats) < len(input_shape):
+            raise CodegenBackendError(
+                "codegen repeat expects repeats to cover the input rank"
+            )
+        output_shape = []
+        pad = len(repeats) - len(input_shape)
+        output_shape.extend(repeats[:pad])
+        for size, repeat in zip(input_shape, repeats[pad:]):
+            output_shape.append(size * repeat)
+        return tuple(output_shape)
 
 
 class ResizeHandler(OpKindHandler):
@@ -374,6 +417,56 @@ class IndexSelectHandler(OpKindHandler):
         dim = int(op_node.p("dim"))
         output_shape = list(input_shape)
         output_shape[dim] = index_shape[0]
+        return tuple(output_shape)
+
+
+class SplitWithSizesHandler(OpKindHandler):
+    def emit(
+        self, node_index: int, op_node: _OpNode, graph: _GenericGraph
+    ) -> List[str]:
+        return self._emit_standard(
+            node_index,
+            op_node,
+            graph,
+            params={
+                "dim": int(op_node.p("dim", 0)),
+                "offset": int(op_node.p("offset", 0)),
+            },
+        )
+class NonzeroHandler(OpKindHandler):
+    def emit(
+        self, node_index: int, op_node: _OpNode, graph: _GenericGraph
+    ) -> List[str]:
+        return self._emit_standard(node_index, op_node, graph)
+
+    def infer_shapes(
+        self,
+        op_node: _OpNode,
+        input_shapes: Sequence[Tuple[int, ...]],
+    ) -> Tuple[int, ...]:
+        input_shape = input_shapes[0]
+        dim = int(op_node.p("dim", 0))
+        split_size = int(op_node.p("split_size"))
+        split_offset = int(op_node.p("offset", 0))
+        if dim < 0:
+            dim += len(input_shape)
+        if dim < 0 or dim >= len(input_shape):
+            raise CodegenBackendError(
+                "codegen split_with_sizes dim is out of range"
+            )
+        if split_size < 0:
+            raise CodegenBackendError(
+                "codegen split_with_sizes expects non-negative split sizes"
+            )
+        if split_offset + split_size > input_shape[dim]:
+            raise CodegenBackendError(
+                "codegen split_with_sizes expects split sizes to fit input"
+            )
+        output_shape = list(input_shape)
+        output_shape[dim] = split_size
+        output_shape = op_node.p("output_shape")
+        if output_shape is None:
+            raise CodegenBackendError("codegen nonzero expects output shape")
         return tuple(output_shape)
 
 
@@ -912,6 +1005,75 @@ class _BackendMatmulHandler(MatmulHandler):
         return OpNodeBuildResult(op_node)
 
 
+class _BackendNonzeroHandler(NonzeroHandler):
+    def build_op_node(
+        self,
+        node: torch.fx.Node,
+        op_spec: _OpSpec,
+        dtype_info: _CodegenDType | None,
+        shapes: Dict[torch.fx.Node, tuple[int, ...]],
+        strides: Dict[torch.fx.Node, tuple[int, ...]],
+        dtypes: Dict[torch.fx.Node, torch.dtype],
+        scalar_values: Dict[torch.fx.Node, object],
+        inplace_input: int | None,
+    ) -> OpNodeBuildResult | None:
+        if dtype_info is None:
+            return None
+        if inplace_input is not None:
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} does not support inplace variants"
+            )
+        if not node.args:
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} expects an input tensor"
+            )
+        if len(node.args) > 1:
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} expects exactly one input"
+            )
+        if node.kwargs:
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} expects positional args only"
+            )
+        input_arg = node.args[0]
+        if not isinstance(input_arg, torch.fx.Node) or input_arg not in shapes:
+            raise self._ctx.analysis_service.error_expected_tensor(op_spec.name)
+        if dtypes[input_arg] is not dtype_info.torch_dtype:
+            raise CodegenBackendError(
+                f"codegen {op_spec.name} expects inputs to share the graph dtype"
+            )
+        input_shape = shapes[input_arg]
+        output_value = node.meta.get("val") or node.meta.get("example_value")
+        if not isinstance(output_value, torch.Tensor):
+            input_value = scalar_values.get(input_arg)
+            if not isinstance(input_value, torch.Tensor):
+                input_value = input_arg.meta.get("val") or input_arg.meta.get(
+                    "example_value"
+                )
+            if not isinstance(input_value, torch.Tensor):
+                raise CodegenBackendError(
+                    "codegen nonzero requires example tensor metadata to infer output shape"
+                )
+            output_value = torch.nonzero(input_value)
+        output_shape = tuple(int(dim) for dim in output_value.shape)
+        if len(output_shape) != 2 or output_shape[1] != len(input_shape):
+            raise CodegenBackendError(
+                "codegen nonzero expects output shape to be (count, input_rank)"
+            )
+        op_node = _OpNode(
+            node=node,
+            spec=op_spec,
+            inputs=[input_arg],
+            output_shape=output_shape,
+            inplace_input=None,
+            params={"output_shape": output_shape},
+        )
+        shapes[node] = output_shape
+        strides[node] = _contiguous_strides(output_shape)
+        dtypes[node] = torch.int64
+        return OpNodeBuildResult(op_node)
+
+
 class _BackendAddrHandler(AddrHandler):
     def build_op_node(
         self,
@@ -1267,6 +1429,11 @@ def build_handlers(context: TensorContext) -> Dict[OpKind, OpKindHandler]:
             ViewEmitter(),
             builder=_build_with_dtype(context, "build_view"),
         ),
+        OpKind.REPEAT: RepeatHandler(
+            context,
+            RepeatEmitter(),
+            builder=_build_with_dtype(context, "build_repeat"),
+        ),
         OpKind.RESIZE: ResizeHandler(
             context,
             ResizeEmitter(),
@@ -1282,6 +1449,11 @@ def build_handlers(context: TensorContext) -> Dict[OpKind, OpKindHandler]:
             context,
             DiagonalEmitter(),
             builder=_build_with_dtype(context, "build_diagonal"),
+        ),
+        OpKind.DROPOUT: DropoutHandler(
+            context,
+            DropoutEmitter(),
+            builder=_build_with_dtype(context, "build_native_dropout"),
         ),
         OpKind.CUMSUM: CumsumHandler(
             context,
@@ -1312,6 +1484,13 @@ def build_handlers(context: TensorContext) -> Dict[OpKind, OpKindHandler]:
             context,
             IndexSelectEmitter(),
             builder=_build_with_dtype(context, "build_index_select"),
+        ),
+        OpKind.SPLIT_WITH_SIZES: SplitWithSizesHandler(
+            context,
+            SplitWithSizesEmitter(),
+        OpKind.NONZERO: _BackendNonzeroHandler(
+            context,
+            NonzeroEmitter(),
         ),
         OpKind.COL2IM: Col2imHandler(
             context,
@@ -1448,6 +1627,8 @@ def build_kind_handler_registrations() -> Dict[OpKind, "KindHandlerRegistration"
         ),
         OpKind.SELECT_SCATTER: KindHandlerRegistration(
             SelectScatterHandler, SelectScatterEmitter
+        OpKind.NONZERO: KindHandlerRegistration(
+            _BackendNonzeroHandler, NonzeroEmitter
         ),
     }
 
