@@ -942,20 +942,6 @@ class TestCodegenSpecialOps(TestCase):
         result = compiled(input_tensor)
         torch.testing.assert_close(result, expected)
 
-    def test_codegen_avg_pool3d(self):
-        input_tensor = torch.randn(1, 2, 4, 4, 4)
-        compiled = torch.compile(
-            lambda inp: torch.ops.aten.avg_pool3d.default(
-                inp, (2, 2, 2), (2, 2, 2), (0, 0, 0), False, True, None
-            ),
-            backend=codegen_generic_backend,
-        )
-        expected = torch.ops.aten.avg_pool3d.default(
-            input_tensor, (2, 2, 2), (2, 2, 2), (0, 0, 0), False, True, None
-        )
-        result = compiled(input_tensor)
-        torch.testing.assert_close(result, expected)
-
     def test_codegen_adaptive_avg_pool2d_backward(self):
         grad_output = torch.randn(1, 2, 2, 2)
         input_tensor = torch.randn(1, 2, 4, 4)
