@@ -217,6 +217,27 @@ class Compiler:
             env[node] = torch.ones_like(input_tensor, dtype=torch.bool)
             return True
 
+        def _resolve_optional_weight_bias(
+            op_node: _GenericGraph.OpNode,
+            env: Dict[torch.fx.Node, object],
+            graph_alias_map: Dict[torch.fx.Node, torch.fx.Node],
+            start_index: int,
+        ) -> Tuple[object | None, object | None, int]:
+            has_weight = bool(op_node.p("has_weight", False))
+            has_bias = bool(op_node.p("has_bias", False))
+            weight_tensor = None
+            bias_tensor = None
+            input_index = start_index
+            if has_weight:
+                weight_node = op_node.inputs[input_index]
+                weight_tensor = env.get(_resolve_alias(weight_node, graph_alias_map))
+                input_index += 1
+            if has_bias:
+                bias_node = op_node.inputs[input_index]
+                bias_tensor = env.get(_resolve_alias(bias_node, graph_alias_map))
+                input_index += 1
+            return weight_tensor, bias_tensor, input_index
+
         def _maybe_fill_layer_norm_stats(
             node: torch.fx.Node, env: Dict[torch.fx.Node, object]
         ) -> bool:
@@ -235,18 +256,9 @@ class Compiler:
             input_tensor = env.get(_resolve_alias(input_node, graph.alias_map))
             if not isinstance(input_tensor, torch.Tensor):
                 return False
-            has_weight = bool(op_node.p("has_weight", False))
-            has_bias = bool(op_node.p("has_bias", False))
-            weight_tensor = None
-            bias_tensor = None
-            input_index = 1
-            if has_weight:
-                weight_node = op_node.inputs[input_index]
-                weight_tensor = env.get(_resolve_alias(weight_node, graph.alias_map))
-                input_index += 1
-            if has_bias:
-                bias_node = op_node.inputs[input_index]
-                bias_tensor = env.get(_resolve_alias(bias_node, graph.alias_map))
+            weight_tensor, bias_tensor, _ = _resolve_optional_weight_bias(
+                op_node, env, graph.alias_map, 1
+            )
             normalized_shape = tuple(op_node.p("normalized_shape"))
             eps = float(op_node.p("eps", 1e-5))
             _output, mean, rstd = torch.ops.aten.native_layer_norm.default(
@@ -273,18 +285,9 @@ class Compiler:
             input_tensor = env.get(_resolve_alias(input_node, graph.alias_map))
             if not isinstance(input_tensor, torch.Tensor):
                 return False
-            has_weight = bool(op_node.p("has_weight", False))
-            has_bias = bool(op_node.p("has_bias", False))
-            weight_tensor = None
-            bias_tensor = None
-            input_index = 1
-            if has_weight:
-                weight_node = op_node.inputs[input_index]
-                weight_tensor = env.get(_resolve_alias(weight_node, graph.alias_map))
-                input_index += 1
-            if has_bias:
-                bias_node = op_node.inputs[input_index]
-                bias_tensor = env.get(_resolve_alias(bias_node, graph.alias_map))
+            weight_tensor, bias_tensor, _ = _resolve_optional_weight_bias(
+                op_node, env, graph.alias_map, 1
+            )
             groups = int(op_node.p("groups", 1))
             eps = float(op_node.p("eps", 1e-5))
             n_value = int(op_node.p("N"))
@@ -330,18 +333,9 @@ class Compiler:
                 for tensor in (grad_output, input_tensor, mean_tensor, rstd_tensor)
             ):
                 return False
-            has_weight = bool(op_node.p("has_weight", False))
-            has_bias = bool(op_node.p("has_bias", False))
-            weight_tensor = None
-            bias_tensor = None
-            input_index = 4
-            if has_weight:
-                weight_node = op_node.inputs[input_index]
-                weight_tensor = env.get(_resolve_alias(weight_node, graph.alias_map))
-                input_index += 1
-            if has_bias:
-                bias_node = op_node.inputs[input_index]
-                bias_tensor = env.get(_resolve_alias(bias_node, graph.alias_map))
+            weight_tensor, bias_tensor, _ = _resolve_optional_weight_bias(
+                op_node, env, graph.alias_map, 4
+            )
             normalized_shape = tuple(op_node.p("normalized_shape"))
             output_mask = tuple(op_node.p("output_mask"))
             grads = torch.ops.aten.native_layer_norm_backward.default(
@@ -384,11 +378,9 @@ class Compiler:
                 for tensor in (grad_output, input_tensor, mean_tensor, rstd_tensor)
             ):
                 return False
-            has_weight = bool(op_node.p("has_weight", False))
-            weight_tensor = None
-            if has_weight:
-                weight_node = op_node.inputs[4]
-                weight_tensor = env.get(_resolve_alias(weight_node, graph.alias_map))
+            weight_tensor, _bias_tensor, _ = _resolve_optional_weight_bias(
+                op_node, env, graph.alias_map, 4
+            )
             output_mask = tuple(op_node.p("output_mask"))
             n_value = int(op_node.p("N"))
             c_value = int(op_node.p("C"))
