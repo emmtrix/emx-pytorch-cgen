@@ -90,6 +90,10 @@ def build_supported_ops() -> dict[str, _OpSpec]:
         torch.ops.aten.index_select.default,
         torch.ops.aten.index_select,
     ).build()
+    registry.register_op("split_with_sizes", kind=OpKind.SPLIT_WITH_SIZES).targets(
+        torch.ops.aten.split_with_sizes.default,
+        torch.ops.aten.split_with_sizes,
+    ).build()
     registry.register_op("diagonal", kind=OpKind.DIAGONAL).targets(
         torch.diagonal,
         torch.ops.aten.diagonal.default,

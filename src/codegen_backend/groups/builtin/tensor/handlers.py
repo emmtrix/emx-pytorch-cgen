@@ -32,6 +32,7 @@ from codegen_backend.emitters.masked_scatter import MaskedScatterEmitter
 from codegen_backend.emitters.pad import PadEmitter
 from codegen_backend.emitters.pdist import PdistEmitter
 from codegen_backend.emitters.resize import ResizeEmitter
+from codegen_backend.emitters.split_with_sizes import SplitWithSizesEmitter
 from codegen_backend.emitters.view import ViewEmitter
 from codegen_backend.errors import CodegenBackendError
 from codegen_backend.graph import _GenericGraph, _OpNode
@@ -359,6 +360,48 @@ class IndexSelectHandler(OpKindHandler):
         dim = int(op_node.p("dim"))
         output_shape = list(input_shape)
         output_shape[dim] = index_shape[0]
+        return tuple(output_shape)
+
+
+class SplitWithSizesHandler(OpKindHandler):
+    def emit(
+        self, node_index: int, op_node: _OpNode, graph: _GenericGraph
+    ) -> List[str]:
+        return self._emit_standard(
+            node_index,
+            op_node,
+            graph,
+            params={
+                "dim": int(op_node.p("dim", 0)),
+                "offset": int(op_node.p("offset", 0)),
+            },
+        )
+
+    def infer_shapes(
+        self,
+        op_node: _OpNode,
+        input_shapes: Sequence[Tuple[int, ...]],
+    ) -> Tuple[int, ...]:
+        input_shape = input_shapes[0]
+        dim = int(op_node.p("dim", 0))
+        split_size = int(op_node.p("split_size"))
+        split_offset = int(op_node.p("offset", 0))
+        if dim < 0:
+            dim += len(input_shape)
+        if dim < 0 or dim >= len(input_shape):
+            raise CodegenBackendError(
+                "codegen split_with_sizes dim is out of range"
+            )
+        if split_size < 0:
+            raise CodegenBackendError(
+                "codegen split_with_sizes expects non-negative split sizes"
+            )
+        if split_offset + split_size > input_shape[dim]:
+            raise CodegenBackendError(
+                "codegen split_with_sizes expects split sizes to fit input"
+            )
+        output_shape = list(input_shape)
+        output_shape[dim] = split_size
         return tuple(output_shape)
 
 
@@ -1292,6 +1335,10 @@ def build_handlers(context: TensorContext) -> Dict[OpKind, OpKindHandler]:
             context,
             IndexSelectEmitter(),
             builder=_build_with_dtype(context, "build_index_select"),
+        ),
+        OpKind.SPLIT_WITH_SIZES: SplitWithSizesHandler(
+            context,
+            SplitWithSizesEmitter(),
         ),
         OpKind.COL2IM: Col2imHandler(
             context,

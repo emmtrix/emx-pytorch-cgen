@@ -45,6 +45,7 @@ class OpKind(str, Enum):
     RESIZE = "resize"
     COL2IM = "col2im"
     MASKED_SCATTER = "masked_scatter"
+    SPLIT_WITH_SIZES = "split_with_sizes"
 
 
 @dataclass(frozen=True)

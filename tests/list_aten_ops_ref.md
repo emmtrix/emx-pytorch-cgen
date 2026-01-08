@@ -1565,7 +1565,7 @@
 | `special_zeta` | — |
 | `split` | — |
 | `split_copy` | — |
-| `split_with_sizes` | — |
+| `split_with_sizes` | ✅ |
 | `split_with_sizes_copy` | — |
 | `splitlines` | — |
 | `sqrt` | ✅ |
@@ -1719,5 +1719,5 @@
 
 ## Summary
 - total aten ops: 1714
-- supported by codegen: 277 / 1714 (16.2 %)
-- unsupported by codegen: 1437
+- supported by codegen: 279 / 1714 (16.3 %)
+- unsupported by codegen: 1435
