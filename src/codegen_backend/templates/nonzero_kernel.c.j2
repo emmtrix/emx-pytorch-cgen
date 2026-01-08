@@ -1,10 +1,15 @@
 {{ signature }}
-{% for line in loop_lines %}
-{{ line }}
+    ssize_t out_index = 0;
+{% for dim in range(input_shape | length) %}
+{{ "    " * (dim + 1) }}for (ssize_t i{{ dim }} = 0; i{{ dim }} < {{ input_shape[dim] }}; ++i{{ dim }}) {
 {% endfor %}
-{% for line in body_lines %}
-{{ line }}
+{{ "    " * (input_shape | length + 1) }}if ({{ input_access }} != 0) {
+{% for dim in range(output_access | length) %}
+{{ "    " * (input_shape | length + 2) }}{{ output_access[dim] }} = (int64_t)i{{ dim }};
 {% endfor %}
-{% for line in footer_lines %}
-{{ line }}
+{{ "    " * (input_shape | length + 2) }}out_index += 1;
+{{ "    " * (input_shape | length + 1) }}}
+{% for dim in range(input_shape | length) %}
+{{ "    " * (input_shape | length - dim - 1) }}}
 {% endfor %}
+}

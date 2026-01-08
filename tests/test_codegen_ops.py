@@ -749,6 +749,9 @@ CODEGEN_OP_TEST_CONFIG = {
     torch.ops.aten.flatten.using_ints: {
         "requires_contiguous": True,
     },
+    torch.ops.aten.reshape.default: {
+        "requires_contiguous": True,
+    },
     torch.ops.aten.cat.default: {
         "expand_input_list": True,
     },
