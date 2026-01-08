@@ -24,9 +24,11 @@ from codegen_backend.emitters.diagonal import DiagonalEmitter
 from codegen_backend.emitters.empty_strided import EmptyStridedEmitter
 from codegen_backend.emitters.flip import FlipEmitter
 from codegen_backend.emitters.gather import GatherEmitter
+from codegen_backend.emitters.index_put import IndexPutEmitter
 from codegen_backend.emitters.index_select import IndexSelectEmitter
 from codegen_backend.emitters.linear import LinearEmitter
 from codegen_backend.emitters.matmul import MatmulEmitter
+from codegen_backend.emitters.masked_scatter import MaskedScatterEmitter
 from codegen_backend.emitters.pad import PadEmitter
 from codegen_backend.emitters.pdist import PdistEmitter
 from codegen_backend.emitters.resize import ResizeEmitter
@@ -208,6 +210,8 @@ class ViewHandler(OpKindHandler):
                     "codegen flatten expects shape to be resolved"
                 )
             return tuple(size)
+        if op_node.spec.name == "_local_scalar_dense":
+            return tuple(input_shapes[0])
         raise CodegenBackendError(f"Unsupported view op: {op_node.spec.name}")
 
 
@@ -305,6 +309,34 @@ class GatherHandler(OpKindHandler):
         input_shapes: Sequence[Tuple[int, ...]],
     ) -> Tuple[int, ...]:
         return input_shapes[1]
+
+
+class IndexPutHandler(OpKindHandler):
+    def emit(
+        self, node_index: int, op_node: _OpNode, graph: _GenericGraph
+    ) -> List[str]:
+        return self._emit_standard(node_index, op_node, graph)
+
+    def infer_shapes(
+        self,
+        op_node: _OpNode,
+        input_shapes: Sequence[Tuple[int, ...]],
+    ) -> Tuple[int, ...]:
+        return input_shapes[0]
+
+
+class MaskedScatterHandler(OpKindHandler):
+    def emit(
+        self, node_index: int, op_node: _OpNode, graph: _GenericGraph
+    ) -> List[str]:
+        return self._emit_standard(node_index, op_node, graph)
+
+    def infer_shapes(
+        self,
+        op_node: _OpNode,
+        input_shapes: Sequence[Tuple[int, ...]],
+    ) -> Tuple[int, ...]:
+        return input_shapes[0]
 
 
 class IndexSelectHandler(OpKindHandler):
@@ -1246,6 +1278,16 @@ def build_handlers(context: TensorContext) -> Dict[OpKind, OpKindHandler]:
             GatherEmitter(),
             builder=_build_with_dtype(context, "build_gather"),
         ),
+        OpKind.INDEX_PUT: IndexPutHandler(
+            context,
+            IndexPutEmitter(),
+            builder=_build_with_inplace(context, "build_index_put"),
+        ),
+        OpKind.MASKED_SCATTER: MaskedScatterHandler(
+            context,
+            MaskedScatterEmitter(),
+            builder=_build_with_inplace(context, "build_masked_scatter"),
+        ),
         OpKind.INDEX_SELECT: IndexSelectHandler(
             context,
             IndexSelectEmitter(),
@@ -1380,6 +1422,9 @@ def build_kind_handler_registrations() -> Dict[OpKind, "KindHandlerRegistration"
         ),
         OpKind.EMPTY_STRIDED: KindHandlerRegistration(
             _BackendEmptyStridedHandler, EmptyStridedEmitter
+        ),
+        OpKind.MASKED_SCATTER: KindHandlerRegistration(
+            MaskedScatterHandler, MaskedScatterEmitter
         ),
     }
 

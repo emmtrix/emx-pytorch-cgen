@@ -275,7 +275,7 @@
 | `_linalg_solve_ex` | — |
 | `_linalg_svd` | — |
 | `_list_to_tensor` | — |
-| `_local_scalar_dense` | — |
+| `_local_scalar_dense` | ✅ |
 | `_log_softmax` | ✅ |
 | `_log_softmax_backward_data` | — |
 | `_logcumsumexp` | — |
@@ -970,8 +970,8 @@
 | `index_copy_` | — |
 | `index_fill` | — |
 | `index_fill_` | — |
-| `index_put` | — |
-| `index_put_` | — |
+| `index_put` | ✅ |
+| `index_put_` | ✅ |
 | `index_reduce` | — |
 | `index_reduce_` | — |
 | `index_select` | ✅ |
@@ -1151,8 +1151,8 @@
 | `margin_ranking_loss` | — |
 | `masked_fill` | — |
 | `masked_fill_` | — |
-| `masked_scatter` | — |
-| `masked_scatter_` | — |
+| `masked_scatter` | ✅ |
+| `masked_scatter_` | ✅ |
 | `masked_scatter_backward` | — |
 | `masked_select` | — |
 | `masked_select_backward` | — |
@@ -1719,5 +1719,5 @@
 
 ## Summary
 - total aten ops: 1714
-- supported by codegen: 272 / 1714 (15.9 %)
-- unsupported by codegen: 1442
+- supported by codegen: 277 / 1714 (16.2 %)
+- unsupported by codegen: 1437

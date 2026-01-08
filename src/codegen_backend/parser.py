@@ -74,7 +74,7 @@ class Parser:
         if not tensor_examples:
             if all_tensor_examples:
                 raise CodegenBackendError(
-                    "codegen backend supports only torch.float32, torch.int8, torch.int32, or torch.bool tensors"
+                    "codegen backend supports only torch.float32, torch.int8, torch.uint8, torch.uint32, torch.int32, or torch.bool tensors"
                 )
             return None
         for example in self._iter_example_tensors(example_inputs):
@@ -103,7 +103,7 @@ class Parser:
         dtype_info = _CODEGEN_DTYPES.get(first_dtype)
         if dtype_info is None:
             raise CodegenBackendError(
-                "codegen backend supports only torch.float32, torch.int8, torch.int32, or torch.bool tensors"
+                "codegen backend supports only torch.float32, torch.int8, torch.uint8, torch.uint32, torch.int32, or torch.bool tensors"
             )
         for example in tensor_examples:
             if example.dtype is torch.bool:
@@ -146,6 +146,6 @@ class Parser:
         dtype_info = _CODEGEN_DTYPES.get(dtype_value)
         if dtype_info is None:
             raise CodegenBackendError(
-                "codegen empty_strided supports only torch.float32, torch.int8, torch.int32, or torch.bool tensors"
+                "codegen empty_strided supports only torch.float32, torch.int8, torch.uint8, torch.uint32, torch.int32, or torch.bool tensors"
             )
         return dtype_info

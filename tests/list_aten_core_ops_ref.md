@@ -8,7 +8,7 @@
 | `_cdist_forward` | ✅ |
 | `_embedding_bag` | ✅ |
 | `_fft_r2c` | — |
-| `_local_scalar_dense` | — |
+| `_local_scalar_dense` | ✅ |
 | `_log_softmax` | ✅ |
 | `_native_batch_norm_legit` | ✅ |
 | `_native_batch_norm_legit.no_stats` | — |
@@ -96,7 +96,7 @@
 | `gt.Tensor` | ✅ |
 | `hardtanh` | ✅ |
 | `index.Tensor` | — |
-| `index_put` | — |
+| `index_put` | ✅ |
 | `index_select` | ✅ |
 | `isinf` | ✅ |
 | `isnan` | ✅ |
@@ -113,7 +113,7 @@
 | `logical_xor` | ✅ |
 | `lt.Scalar` | ✅ |
 | `lt.Tensor` | ✅ |
-| `masked_scatter` | — |
+| `masked_scatter` | ✅ |
 | `max.dim` | ✅ |
 | `max_pool2d_with_indices` | — |
 | `max_pool2d_with_indices_backward` | — |
@@ -197,5 +197,5 @@
 
 ## Summary
 - total core aten ops: 192
-- supported by codegen: 144 / 192 (75.0%)
-- unsupported by codegen: 48
+- supported by codegen: 147 / 192 (76.6%)
+- unsupported by codegen: 45

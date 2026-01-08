@@ -182,6 +182,7 @@ CODEGEN_ATEN_OPS = [
     torch.ops.aten.arcsinh.default,
     torch.ops.aten.arctan.default,
     torch.ops.aten.arange.start_step,
+    torch.ops.aten._local_scalar_dense.default,
     torch.ops.aten.bitwise_and.Tensor,
     torch.ops.aten.bitwise_and.Scalar,
     torch.ops.aten.bitwise_left_shift.Tensor,
@@ -237,6 +238,8 @@ CODEGEN_ATEN_OPS = [
     torch.ops.aten.frac.default,
     torch.ops.aten.full_like.default,
     torch.ops.aten.gather.default,
+    torch.ops.aten.index_put.default,
+    torch.ops.aten.masked_scatter.default,
     torch.ops.aten.index_select.default,
     torch.ops.aten.heaviside.default,
     torch.ops.aten.hypot.default,
@@ -423,6 +426,7 @@ INPLACE_ATEN_OPS = [
     torch.ops.aten.heaviside_.default,
     torch.ops.aten.hypot_.default,
     torch.ops.aten.i0_.default,
+    torch.ops.aten.index_put_.default,
     torch.ops.aten.ldexp_.default,
     torch.ops.aten.lgamma_.default,
     torch.ops.aten.log_.default,
@@ -430,6 +434,7 @@ INPLACE_ATEN_OPS = [
     torch.ops.aten.log1p_.default,
     torch.ops.aten.log2_.default,
     torch.ops.aten.logit_.default,
+    torch.ops.aten.masked_scatter_.default,
     torch.ops.aten.mish_.default,
     torch.ops.aten.logical_and_.default,
     torch.ops.aten.logical_not_.default,
@@ -648,6 +653,7 @@ CODEGEN_SPECIAL_TEST_OPS = [
     torch.ops.aten.col2im.default,
     torch.ops.aten.constant_pad_nd.default,
     torch.ops.aten.copy.default,
+    torch.ops.aten._local_scalar_dense.default,
     torch.ops.aten.div.Tensor_mode,
     torch.ops.aten.div.Scalar_mode,
     torch.ops.aten.squeeze.dim,
@@ -665,8 +671,63 @@ CODEGEN_SPECIAL_TEST_OPS = [
     torch.ops.aten._embedding_bag.default,
     torch.ops.aten.embedding_dense_backward.default,
 ]
+CODEGEN_OP_TEST_CONFIG = {
+    torch.ops.aten.clamp.default: {
+        "allowed_dtypes": (torch.float32, torch.int8, torch.int32),
+    },
+    torch.ops.aten.clamp.Tensor: {
+        "allowed_dtypes": (torch.float32,),
+    },
+    torch.ops.aten.clamp_.default: {
+        "allowed_dtypes": (torch.float32, torch.int8, torch.int32),
+    },
+    torch.ops.aten.clamp_.Tensor: {
+        "allowed_dtypes": (torch.float32,),
+    },
+    torch.ops.aten.where.self: {},
+    torch.ops.aten.where.Scalar: {},
+    torch.ops.aten.full_like.default: {},
+    torch.ops.aten.arange.start_step: {
+        "allow_no_tensor_inputs": True,
+    },
+    torch.ops.aten.avg_pool2d_backward.default: {
+        "requires_contiguous": True,
+    },
+    torch.ops.aten.digamma.default: {
+        "rtol": 3e-5,
+        "atol": 0.0,
+    },
+    torch.ops.aten.view.default: {
+        "requires_contiguous": True,
+    },
+    torch.ops.aten.flatten.using_ints: {
+        "requires_contiguous": True,
+    },
+    torch.ops.aten.cat.default: {
+        "expand_input_list": True,
+    },
+    torch.ops.aten._native_batch_norm_legit.default: {
+        "allow_noncontiguous": False,
+        "requires_contiguous": True,
+    },
+    torch.ops.aten.resize_.default: {},
+    torch.ops.aten.addbmm.default: {
+        "rtol": 2e-4,
+        "atol": 2e-5,
+    },
+    torch.ops.aten.addr.default: {
+        "equal_nan": True,
+    },
+}
 DEFAULT_CONSTRAINTS = {
-    "allowed_dtypes": (torch.float32, torch.int8, torch.int32, torch.bool),
+    "allowed_dtypes": (
+        torch.float32,
+        torch.int8,
+        torch.uint8,
+        torch.uint32,
+        torch.int32,
+        torch.bool,
+    ),
     "allow_noncontiguous": True,
     "allow_non_tensor_args": True,
     "allow_kwargs": True,
@@ -828,7 +889,7 @@ def _reference_for_dtype(
     kwargs: dict[str, object],
     dtype: torch.dtype,
 ) -> torch.Tensor:
-    if dtype not in (torch.int8, torch.int32, torch.bool):
+    if dtype not in (torch.int8, torch.uint8, torch.uint32, torch.int32, torch.bool):
         return aten_overload(*inputs, **kwargs)
     try:
         expected = aten_overload(*inputs, **kwargs)
@@ -898,7 +959,9 @@ class TestCodegenOpInfo(TestCase):
                 continue
             result = compiled(*inputs, **kwargs)
             expected = _match_expected_dtype(result, expected)
-            compare_kwargs = {"equal_nan": dtype in (torch.int8, torch.int32)}
+            compare_kwargs = {
+                "equal_nan": dtype in (torch.int8, torch.uint8, torch.uint32, torch.int32)
+            }
             if constraints.get("equal_nan"):
                 compare_kwargs["equal_nan"] = True
             if _contains_nan(expected) or _contains_nan(result):
@@ -910,6 +973,16 @@ class TestCodegenOpInfo(TestCase):
 
 
 class TestCodegenSpecialOps(TestCase):
+    def test_codegen_local_scalar_dense(self):
+        input_tensor = torch.tensor(3.5)
+        compiled = torch.compile(
+            lambda inp: torch.ops.aten._local_scalar_dense.default(inp),
+            backend=codegen_generic_backend,
+        )
+        expected = torch.ops.aten._local_scalar_dense.default(input_tensor)
+        result = compiled(input_tensor)
+        torch.testing.assert_close(result, expected)
+
     def test_codegen_adaptive_avg_pool3d(self):
         input_tensor = torch.randn(1, 2, 4, 4, 4)
         compiled = torch.compile(

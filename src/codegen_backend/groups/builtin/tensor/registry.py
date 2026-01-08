@@ -36,6 +36,10 @@ def build_supported_ops() -> dict[str, _OpSpec]:
         torch.ops.aten.as_strided.default,
         torch.ops.aten.as_strided,
     ).build()
+    registry.register_op("_local_scalar_dense", kind=OpKind.VIEW).targets(
+        torch.ops.aten._local_scalar_dense.default,
+        torch.ops.aten._local_scalar_dense,
+    ).build()
     registry.register_op("reshape", kind=OpKind.VIEW).targets(
         torch.reshape,
         torch.ops.aten.reshape.default,
@@ -59,6 +63,27 @@ def build_supported_ops() -> dict[str, _OpSpec]:
         torch.gather,
         torch.ops.aten.gather.default,
         torch.ops.aten.gather,
+    ).build()
+    registry.register_op("index_put", kind=OpKind.INDEX_PUT).targets(
+        torch.ops.aten.index_put.default,
+        torch.ops.aten.index_put,
+        torch.ops.aten.index_put_.default,
+        torch.ops.aten.index_put_,
+    ).inplace(
+        torch.ops.aten.index_put_.default,
+        torch.ops.aten.index_put_,
+        arg_index=0,
+    ).build()
+    registry.register_op("masked_scatter", kind=OpKind.MASKED_SCATTER).targets(
+        torch.masked_scatter,
+        torch.ops.aten.masked_scatter.default,
+        torch.ops.aten.masked_scatter,
+        torch.ops.aten.masked_scatter_.default,
+        torch.ops.aten.masked_scatter_,
+    ).inplace(
+        torch.ops.aten.masked_scatter_.default,
+        torch.ops.aten.masked_scatter_,
+        arg_index=0,
     ).build()
     registry.register_op("index_select", kind=OpKind.INDEX_SELECT).targets(
         torch.index_select,

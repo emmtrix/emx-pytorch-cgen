@@ -52,6 +52,84 @@ def parse_gather_args(
     return input_arg, dim, index, sparse_grad
 
 
+def parse_masked_scatter_args(
+    node: torch.fx.Node,
+) -> Tuple[object, object, object]:
+    if len(node.args) > 3:
+        raise CodegenBackendError(
+            "codegen masked_scatter expects at most three inputs"
+        )
+    if not node.args:
+        raise CodegenBackendError(
+            "codegen masked_scatter expects input, mask, and source"
+        )
+    input_arg = node.args[0]
+    mask = node.args[1] if len(node.args) > 1 else None
+    source = node.args[2] if len(node.args) > 2 else None
+    if node.kwargs:
+        if "mask" in node.kwargs:
+            if mask is not None:
+                raise error_kwarg_specified_once("masked_scatter", "mask")
+            mask = node.kwargs["mask"]
+        if "source" in node.kwargs:
+            if source is not None:
+                raise error_kwarg_specified_once("masked_scatter", "source")
+            source = node.kwargs["source"]
+        extra = set(node.kwargs) - {"mask", "source"}
+        if extra:
+            raise CodegenBackendError(
+                "codegen masked_scatter got unexpected kwargs: "
+                f"{sorted(extra)}"
+            )
+    if mask is None or source is None:
+        raise CodegenBackendError(
+            "codegen masked_scatter expects mask and source arguments"
+        )
+    return input_arg, mask, source
+
+
+def parse_index_put_args(
+    node: torch.fx.Node,
+) -> Tuple[object, object, object, object]:
+    if len(node.args) > 4:
+        raise CodegenBackendError(
+            "codegen index_put expects at most four inputs"
+        )
+    if len(node.args) < 3:
+        raise CodegenBackendError(
+            "codegen index_put expects input, indices, and values"
+        )
+    input_arg = node.args[0]
+    indices = node.args[1] if len(node.args) > 1 else None
+    values = node.args[2] if len(node.args) > 2 else None
+    accumulate = node.args[3] if len(node.args) > 3 else None
+    if node.kwargs:
+        if "indices" in node.kwargs:
+            if indices is not None:
+                raise error_kwarg_specified_once("index_put", "indices")
+            indices = node.kwargs["indices"]
+        if "values" in node.kwargs:
+            if values is not None:
+                raise error_kwarg_specified_once("index_put", "values")
+            values = node.kwargs["values"]
+        if "accumulate" in node.kwargs:
+            if accumulate is not None:
+                raise error_kwarg_specified_once("index_put", "accumulate")
+            accumulate = node.kwargs["accumulate"]
+        extra = set(node.kwargs) - {"indices", "values", "accumulate"}
+        if extra:
+            raise CodegenBackendError(
+                f"codegen index_put got unexpected kwargs: {sorted(extra)}"
+            )
+    if indices is None or values is None:
+        raise CodegenBackendError(
+            "codegen index_put expects indices and values arguments"
+        )
+    if accumulate is None:
+        accumulate = False
+    return input_arg, indices, values, accumulate
+
+
 def parse_index_select_args(
     node: torch.fx.Node,
 ) -> Tuple[object, object, object]:
@@ -298,11 +376,18 @@ def parse_cumsum_args(
     if dtype is not None:
         if isinstance(dtype, torch.fx.Node):
             raise CodegenBackendError(
-                f"codegen {op_name} expects dtype to be torch.float32, torch.int8, torch.int32, or torch.bool"
+                f"codegen {op_name} expects dtype to be torch.float32, torch.int8, torch.uint8, torch.uint32, torch.int32, or torch.bool"
             )
-        if dtype not in (torch.float32, torch.int8, torch.int32, torch.bool):
+        if dtype not in (
+            torch.float32,
+            torch.int8,
+            torch.uint8,
+            torch.uint32,
+            torch.int32,
+            torch.bool,
+        ):
             raise CodegenBackendError(
-                f"codegen {op_name} expects dtype to be torch.float32, torch.int8, torch.int32, or torch.bool"
+                f"codegen {op_name} expects dtype to be torch.float32, torch.int8, torch.uint8, torch.uint32, torch.int32, or torch.bool"
             )
     return dim_value, dtype
 
@@ -405,6 +490,8 @@ __all__ = [
     "parse_diagonal_args",
     "parse_empty_strided_stride",
     "parse_gather_args",
+    "parse_index_put_args",
+    "parse_masked_scatter_args",
     "parse_linear_args",
     "parse_resize_size",
 ]

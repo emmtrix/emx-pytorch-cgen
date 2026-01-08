@@ -108,16 +108,30 @@ class CodegenBackend:
         return self._emitter.emit(graph)
 
 
-_DEFAULT_BACKEND = CodegenBackend()
+_DEFAULT_BACKEND: CodegenBackend | None = None
+_DEFAULT_BACKEND_GROUP_REGISTRY: object | None = None
+
+
+def get_default_backend() -> CodegenBackend:
+    global _DEFAULT_BACKEND
+    global _DEFAULT_BACKEND_GROUP_REGISTRY
+    group_registry = get_group_registry()
+    if (
+        _DEFAULT_BACKEND is None
+        or group_registry is not _DEFAULT_BACKEND_GROUP_REGISTRY
+    ):
+        _DEFAULT_BACKEND = CodegenBackend(group_registry=group_registry)
+        _DEFAULT_BACKEND_GROUP_REGISTRY = group_registry
+    return _DEFAULT_BACKEND
 
 
 def get_generic_source(
     gm: torch.fx.GraphModule, example_inputs: Sequence[object]
 ) -> str:
-    return _DEFAULT_BACKEND.get_generic_source(gm, example_inputs)
+    return get_default_backend().get_generic_source(gm, example_inputs)
 
 
 def codegen_generic_backend(
     gm: torch.fx.GraphModule, example_inputs: List[object]
 ) -> Callable[..., torch.Tensor]:
-    return _DEFAULT_BACKEND.codegen_generic_backend(gm, example_inputs)
+    return get_default_backend().codegen_generic_backend(gm, example_inputs)
