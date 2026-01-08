@@ -1179,7 +1179,7 @@
 | `mean` | ✅ |
 | `median` | — |
 | `meshgrid` | — |
-| `min` | — |
+| `min` | ✅ |
 | `minimum` | ✅ |
 | `miopen_batch_norm` | — |
 | `miopen_batch_norm_backward` | — |
@@ -1719,5 +1719,5 @@
 
 ## Summary
 - total aten ops: 1714
-- supported by codegen: 277 / 1714 (16.2 %)
-- unsupported by codegen: 1437
+- supported by codegen: 279 / 1714 (16.3 %)
+- unsupported by codegen: 1435
