@@ -23,13 +23,6 @@ ONNX_CASES = [
         id="onnx01_add_bias_tiny",
     ),
     pytest.param(
-        ONNX_DIR / "test_onnx02_cnn_approx500k_c124_c248_fcin12288.onnx",
-        id="onnx02_cnn_approx500k_c124_c248_fcin12288",
-        marks=pytest.mark.skip(
-            reason="onnx2pytorch batchnorm trace hits control flow"
-        ),
-    ),
-    pytest.param(
         ONNX_DIR / "test_onnx03_conv2d_tiny.onnx",
         id="onnx03_conv2d_tiny",
     ),
