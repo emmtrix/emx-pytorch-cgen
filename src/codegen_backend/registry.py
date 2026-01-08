@@ -28,9 +28,9 @@ def build_target_registry(
 
 
 def build_target_registry_from_groups() -> Dict[object, _TargetInfo]:
-    from codegen_backend.groups.registry import get_group_registry
+    from codegen_backend.groups.registry import build_group_registry
 
-    return get_group_registry().merged_target_registry()
+    return build_group_registry().merged_target_registry()
 
 
 __all__ = ["_TargetInfo", "build_target_registry", "build_target_registry_from_groups"]

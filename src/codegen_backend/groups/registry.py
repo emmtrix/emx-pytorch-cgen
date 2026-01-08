@@ -65,26 +65,26 @@ class GroupRegistry:
         return merged
 
 
-_GROUP_REGISTRY: GroupRegistry | None = None
-_REGISTERED_GROUPS: Dict[str, OperatorGroupDefinition] = {}
-_DEFAULT_GROUPS_LOADED = False
-_ENTRY_POINTS_LOADED = False
+class GroupRegistryBuilder:
+    def __init__(
+        self, *, groups: Iterable[OperatorGroupDefinition] | None = None
+    ) -> None:
+        self._groups: Dict[str, OperatorGroupDefinition] = {}
+        if groups is not None:
+            for group in groups:
+                self.register_group(group)
+
+    def register_group(self, group: OperatorGroupDefinition) -> None:
+        self._groups[group.name] = group
+
+    def build(self) -> GroupRegistry:
+        return GroupRegistry(groups=list(self._groups.values()))
 
 
-def register_group(group: OperatorGroupDefinition) -> None:
-    global _GROUP_REGISTRY
-    _REGISTERED_GROUPS[group.name] = group
-    _GROUP_REGISTRY = None
-
-
-def _load_builtin_groups() -> None:
-    global _DEFAULT_GROUPS_LOADED
-    if _DEFAULT_GROUPS_LOADED:
-        return
-    _DEFAULT_GROUPS_LOADED = True
+def _load_builtin_groups(builder: GroupRegistryBuilder) -> None:
     from codegen_backend.groups.builtin.registration import register_builtin_groups
 
-    register_builtin_groups()
+    register_builtin_groups(builder)
 
 
 def _iter_entry_points() -> Iterable[metadata.EntryPoint]:
@@ -94,13 +94,15 @@ def _iter_entry_points() -> Iterable[metadata.EntryPoint]:
     return entry_points.get("codegen_backend.groups", [])
 
 
-def _register_from_entry_point(entry_point: metadata.EntryPoint) -> None:
+def _register_from_entry_point(
+    builder: GroupRegistryBuilder, entry_point: metadata.EntryPoint
+) -> None:
     loaded = entry_point.load()
     result = loaded() if callable(loaded) else loaded
     if result is None:
         return
     if isinstance(result, OperatorGroupDefinition):
-        register_group(result)
+        builder.register_group(result)
         return
     if isinstance(result, Sequence):
         for item in result:
@@ -108,27 +110,27 @@ def _register_from_entry_point(entry_point: metadata.EntryPoint) -> None:
                 raise TypeError(
                     "entry point returned a sequence containing non-group items"
                 )
-            register_group(item)
+            builder.register_group(item)
         return
     raise TypeError("entry point did not return a group definition")
 
 
-def _load_entry_point_groups() -> None:
-    global _ENTRY_POINTS_LOADED
-    if _ENTRY_POINTS_LOADED:
-        return
-    _ENTRY_POINTS_LOADED = True
+def load_entry_point_groups(builder: GroupRegistryBuilder) -> None:
     for entry_point in _iter_entry_points():
-        _register_from_entry_point(entry_point)
+        _register_from_entry_point(builder, entry_point)
 
 
-def get_group_registry() -> GroupRegistry:
-    global _GROUP_REGISTRY
-    if _GROUP_REGISTRY is None:
-        _load_builtin_groups()
-        _load_entry_point_groups()
-        _GROUP_REGISTRY = GroupRegistry(groups=list(_REGISTERED_GROUPS.values()))
-    return _GROUP_REGISTRY
+def build_group_registry(*, include_entry_points: bool = True) -> GroupRegistry:
+    builder = GroupRegistryBuilder()
+    _load_builtin_groups(builder)
+    if include_entry_points:
+        load_entry_point_groups(builder)
+    return builder.build()
 
 
-__all__ = ["GroupRegistry", "get_group_registry", "register_group"]
+__all__ = [
+    "GroupRegistry",
+    "GroupRegistryBuilder",
+    "build_group_registry",
+    "load_entry_point_groups",
+]

@@ -31,7 +31,7 @@ from codegen_backend.groups.builtin.tensor.parsing import (
     parse_linear_args,
     parse_resize_size,
 )
-from codegen_backend.groups.registry import get_group_registry
+from codegen_backend.groups.registry import GroupRegistry, build_group_registry
 from codegen_backend.kinds import OpNodeBuildResult
 from codegen_backend.analysis_helpers import (
     channels_last_3d_strides,
@@ -1482,12 +1482,12 @@ class CodegenBackend:
     def __init__(
         self,
         *,
-        group_registry: object | None = None,
+        group_registry: GroupRegistry | None = None,
         analysis_service: GraphAnalysisService | None = None,
         templates_env: object | None = None,
     ) -> None:
         self.group_registry = (
-            group_registry if group_registry is not None else get_group_registry()
+            group_registry if group_registry is not None else build_group_registry()
         )
         self.templates_env = (
             templates_env if templates_env is not None else get_template_env()

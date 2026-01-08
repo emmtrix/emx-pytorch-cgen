@@ -1,7 +1,13 @@
 from codegen_backend.groups.registry import (
     GroupRegistry,
-    get_group_registry,
-    register_group,
+    GroupRegistryBuilder,
+    build_group_registry,
+    load_entry_point_groups,
 )
 
-__all__ = ["GroupRegistry", "get_group_registry", "register_group"]
+__all__ = [
+    "GroupRegistry",
+    "GroupRegistryBuilder",
+    "build_group_registry",
+    "load_entry_point_groups",
+]

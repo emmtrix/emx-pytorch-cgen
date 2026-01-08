@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import torch.fx
 
 from codegen_backend.graph import _OpNode
-from codegen_backend.groups.registry import get_group_registry
+from codegen_backend.groups.registry import build_group_registry
 
 
 class _NullContext:
@@ -36,12 +36,13 @@ def _make_op_node(
     reduction_dims: tuple[int, ...] | None = None,
     keepdim: bool = False,
 ) -> _OpNode:
+    registry = build_group_registry()
     graph = torch.fx.Graph()
     inputs = [graph.placeholder(f"arg{idx}") for idx in range(input_count)]
     output_node = graph.placeholder("out")
     return _OpNode(
         node=output_node,
-        spec=get_group_registry().merged_supported_ops()[op_name],
+        spec=registry.merged_supported_ops()[op_name],
         inputs=inputs,
         output_shape=(),
         reduction_dims=reduction_dims,
@@ -51,7 +52,8 @@ def _make_op_node(
 
 
 def test_infer_output_shape_by_handler() -> None:
-    handlers = get_group_registry().build_kind_handlers(_NullContextProvider())
+    registry = build_group_registry()
+    handlers = registry.build_kind_handlers(_NullContextProvider())
     cases = [
         ("arange", [], {"start": 0, "end": 10, "step": 2}, None, False, (5,)),
         ("add", [(2, 3), (1, 3)], {}, None, False, (2, 3)),
