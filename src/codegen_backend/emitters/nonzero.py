@@ -10,8 +10,6 @@ from codegen_backend.emitters.base import (
     KindEmitterBase,
     _format_array_suffix,
     _is_contiguous,
-    emit_footer,
-    emit_loops,
 )
 from codegen_backend.errors import CodegenBackendError
 from codegen_backend.indexing import _emit_strided_access
@@ -79,8 +77,6 @@ def _write_nonzero_kernel(
         f"const {input_c_type} input{input_suffix}, "
         f"int64_t out{out_suffix}) {{"
     )
-    loop_lines, indent = emit_loops(input_shape)
-    loop_lines = ["    ssize_t out_index = 0;"] + loop_lines
     input_is_contiguous = _is_contiguous(input_shape, input_strides)
     output_is_contiguous = _is_contiguous(output_shape, output_strides)
     input_access = _emit_nonzero_input_access(
@@ -89,26 +85,21 @@ def _write_nonzero_kernel(
         input_c_type=input_c_type,
         input_is_contiguous=input_is_contiguous,
     )
-    body_lines = [f"{indent}if ({input_access} != 0) {{"]
-    inner_indent = f"{indent}    "
+    output_access = []
     for dim in range(len(input_shape)):
-        output_access = _emit_nonzero_output_access(
+        access = _emit_nonzero_output_access(
             output_shape,
             output_strides,
             dim,
             output_is_contiguous=output_is_contiguous,
         )
-        body_lines.append(
-            f"{inner_indent}{output_access} = (int64_t)i{dim};"
-        )
-    body_lines.append(f"{inner_indent}out_index += 1;")
-    body_lines.append(f"{indent}}}")
-    footer_lines = emit_footer(input_shape, indent)
+        output_access.append(access)
     rendered = nonzero_template.render(
         signature=signature,
-        loop_lines=loop_lines,
-        body_lines=body_lines,
-        footer_lines=footer_lines,
+        input_shape=list(input_shape),
+        output_shape=list(output_shape),
+        input_access=input_access,
+        output_access=output_access,
     )
     return rendered.splitlines()
 
