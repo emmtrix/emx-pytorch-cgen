@@ -27,8 +27,8 @@ emx-pytorch2c generates simple, correct, generic, and easily analyzable C code f
   * `torch.int8` / `torch.uint8`
   * `torch.int16` / `torch.uint16`
   * `torch.int32` / `torch.uint32`
+  * `torch.int64` / `torch.uint64`
   * `torch.bool`
-  * Index tensors for embedding/gather-style ops may also use `torch.int64`.
 
 ## Requirements
 
