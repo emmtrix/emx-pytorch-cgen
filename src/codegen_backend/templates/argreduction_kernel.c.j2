@@ -8,11 +8,11 @@
 {% if reduce_all %}
     bool has_value = false;
     {{ input_c_type }} best_value = 0;
-    int64_t best_index = 0;
+    ssize_t best_index = 0;
 {% for dim in reduction_dims %}
     for (ssize_t r{{ dim.dim }} = 0; r{{ dim.dim }} < {{ dim.size }}; ++r{{ dim.dim }}) {
 {% endfor %}
-        int64_t linear_index = {{ linear_index }};
+        ssize_t linear_index = {{ linear_index }};
         {{ input_c_type }} value = {{ input_access }};
         if (!has_value) {
             best_value = value;
@@ -28,7 +28,7 @@
     {{ output_access }} = best_index;
 {% else %}
     {{ input_c_type }} best_value = {{ init_access }};
-    int64_t best_index = 0;
+    ssize_t best_index = 0;
     for (ssize_t r{{ reduction_dim }} = 1; r{{ reduction_dim }} < {{ reduction_size }}; ++r{{ reduction_dim }}) {
         {{ input_c_type }} value = {{ loop_access }};
         if (value {{ compare_op }} best_value) {

@@ -1,6 +1,6 @@
 {{ signature }}
-    const int64_t outer_size = {{ outer_size }};
-    const int64_t inner_size = {{ inner_size }};
+    const ssize_t outer_size = {{ outer_size }};
+    const ssize_t inner_size = {{ inner_size }};
     const {{ c_type }} *input_ptr = &input{{ input_zero_indices }};
     {{ c_type }} *out_ptr = &out{{ output_zero_indices }};
 {% if has_weight %}

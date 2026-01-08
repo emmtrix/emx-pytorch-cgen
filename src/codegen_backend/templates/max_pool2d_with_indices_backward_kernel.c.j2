@@ -12,9 +12,9 @@
         for (ssize_t c = 0; c < {{ channels }}; ++c) {
             for (ssize_t oh = 0; oh < {{ out_h }}; ++oh) {
                 for (ssize_t ow = 0; ow < {{ out_w }}; ++ow) {
-                    int64_t index = indices[n][c][oh][ow];
-                    int64_t in_h_idx = index / {{ in_w }};
-                    int64_t in_w_idx = index % {{ in_w }};
+                    ssize_t index = indices[n][c][oh][ow];
+                    ssize_t in_h_idx = index / {{ in_w }};
+                    ssize_t in_w_idx = index % {{ in_w }};
                     if (in_h_idx >= 0 && in_h_idx < {{ in_h }} && in_w_idx >= 0 && in_w_idx < {{ in_w }}) {
                         out[n][c][in_h_idx][in_w_idx] += grad_output[n][c][oh][ow];
                     }

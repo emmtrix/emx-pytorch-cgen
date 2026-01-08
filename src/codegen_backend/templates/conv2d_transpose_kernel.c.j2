@@ -1,8 +1,8 @@
 {{ signature }}
-    int64_t in_per_group = {{ in_channels }} / {{ groups }};
-    int64_t out_per_group = {{ out_channels }} / {{ groups }};
-    int64_t out_pad_h = {{ out_pad_h }};
-    int64_t out_pad_w = {{ out_pad_w }};
+    ssize_t in_per_group = {{ in_channels }} / {{ groups }};
+    ssize_t out_per_group = {{ out_channels }} / {{ groups }};
+    ssize_t out_pad_h = {{ out_pad_h }};
+    ssize_t out_pad_w = {{ out_pad_w }};
     (void)out_pad_h;
     (void)out_pad_w;
     {% if has_batch %}
@@ -19,22 +19,22 @@
             }
         }
         for (ssize_t ic = 0; ic < {{ in_channels }}; ++ic) {
-            int64_t group = (int64_t)ic / in_per_group;
+            ssize_t group = (ssize_t)ic / in_per_group;
             for (ssize_t ih = 0; ih < {{ in_h }}; ++ih) {
                 for (ssize_t iw = 0; iw < {{ in_w }}; ++iw) {
                     {{ c_type }} value = {{ input_access }};
                     for (ssize_t kh = 0; kh < {{ k_h }}; ++kh) {
-                        int64_t oh = (int64_t)ih * {{ stride_h }} - {{ pad_h }} + (int64_t)kh * {{ dil_h }};
+                        ssize_t oh = (ssize_t)ih * {{ stride_h }} - {{ pad_h }} + (ssize_t)kh * {{ dil_h }};
                         if (oh < 0 || oh >= {{ out_h }}) {
                             continue;
                         }
                         for (ssize_t kw = 0; kw < {{ k_w }}; ++kw) {
-                            int64_t ow = (int64_t)iw * {{ stride_w }} - {{ pad_w }} + (int64_t)kw * {{ dil_w }};
+                            ssize_t ow = (ssize_t)iw * {{ stride_w }} - {{ pad_w }} + (ssize_t)kw * {{ dil_w }};
                             if (ow < 0 || ow >= {{ out_w }}) {
                                 continue;
                             }
                             for (ssize_t oc = 0; oc < out_per_group; ++oc) {
-                                int64_t out_c = group * out_per_group + (int64_t)oc;
+                                ssize_t out_c = group * out_per_group + (ssize_t)oc;
                                 out[n][out_c][oh][ow] +=
                                     value * {{ weight_access }};
                             }
@@ -57,22 +57,22 @@
         }
     }
     for (ssize_t ic = 0; ic < {{ in_channels }}; ++ic) {
-        int64_t group = (int64_t)ic / in_per_group;
+        ssize_t group = (ssize_t)ic / in_per_group;
         for (ssize_t ih = 0; ih < {{ in_h }}; ++ih) {
             for (ssize_t iw = 0; iw < {{ in_w }}; ++iw) {
                 {{ c_type }} value = {{ input_access }};
                 for (ssize_t kh = 0; kh < {{ k_h }}; ++kh) {
-                    int64_t oh = (int64_t)ih * {{ stride_h }} - {{ pad_h }} + (int64_t)kh * {{ dil_h }};
+                    ssize_t oh = (ssize_t)ih * {{ stride_h }} - {{ pad_h }} + (ssize_t)kh * {{ dil_h }};
                     if (oh < 0 || oh >= {{ out_h }}) {
                         continue;
                     }
                     for (ssize_t kw = 0; kw < {{ k_w }}; ++kw) {
-                        int64_t ow = (int64_t)iw * {{ stride_w }} - {{ pad_w }} + (int64_t)kw * {{ dil_w }};
+                        ssize_t ow = (ssize_t)iw * {{ stride_w }} - {{ pad_w }} + (ssize_t)kw * {{ dil_w }};
                         if (ow < 0 || ow >= {{ out_w }}) {
                             continue;
                         }
                         for (ssize_t oc = 0; oc < out_per_group; ++oc) {
-                            int64_t out_c = group * out_per_group + (int64_t)oc;
+                            ssize_t out_c = group * out_per_group + (ssize_t)oc;
                             out[out_c][oh][ow] +=
                                 value * {{ weight_access }};
                         }

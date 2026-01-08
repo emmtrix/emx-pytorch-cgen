@@ -5,7 +5,7 @@
 {% endfor %}
     bool in_bounds = true;
 {% for dim in range(input_shape | length) %}
-    int64_t in_{{ dim }} = (int64_t)i{{ dim }} - {{ pad_before[dim] }};
+    ssize_t in_{{ dim }} = (ssize_t)i{{ dim }} - {{ pad_before[dim] }};
     if (in_{{ dim }} < 0 || in_{{ dim }} >= {{ input_shape[dim] }}) {
         in_bounds = false;
     }

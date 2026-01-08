@@ -19,7 +19,7 @@
     }
 {% endfor %}
 {% endif %}
-    int64_t count = {{ reduction_count }};
+    ssize_t count = {{ reduction_count }};
     if (count == 0 || ({{ unbiased }} && count <= 1)) {
         {{ output_access }} = NAN;
     } else {

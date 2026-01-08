@@ -6,7 +6,7 @@
 void node1_argmax_f32(const float a[2][3], int64_t out[2]) {
     for (ssize_t i0 = 0; i0 < 2; ++i0) {
         float best_value = a[i0][0];
-        int64_t best_index = 0;
+        ssize_t best_index = 0;
         for (ssize_t r1 = 1; r1 < 3; ++r1) {
             float value = a[i0][r1];
             if (value > best_value) {

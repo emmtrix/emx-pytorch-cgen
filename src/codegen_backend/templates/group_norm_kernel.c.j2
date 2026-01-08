@@ -1,9 +1,9 @@
 {{ signature }}
-    const int64_t batch = {{ batch }};
-    const int64_t channels = {{ channels }};
-    const int64_t spatial = {{ spatial_size }};
-    const int64_t groups = {{ groups }};
-    const int64_t channels_per_group = channels / groups;
+    const ssize_t batch = {{ batch }};
+    const ssize_t channels = {{ channels }};
+    const ssize_t spatial = {{ spatial_size }};
+    const ssize_t groups = {{ groups }};
+    const ssize_t channels_per_group = channels / groups;
     const {{ c_type }} *input_ptr = &input{{ input_zero_indices }};
     {{ c_type }} *out_ptr = &out{{ output_zero_indices }};
 {% if has_weight %}
@@ -14,11 +14,11 @@
 {% endif %}
     for (ssize_t n = 0; n < batch; ++n) {
         for (ssize_t g = 0; g < groups; ++g) {
-            const int64_t c_start = g * channels_per_group;
-            const int64_t group_offset = (n * channels + c_start) * spatial;
+            const ssize_t c_start = g * channels_per_group;
+            const ssize_t group_offset = (n * channels + c_start) * spatial;
             {{ c_type }} mean = 0;
             for (ssize_t c = 0; c < channels_per_group; ++c) {
-                const int64_t base = group_offset + c * spatial;
+                const ssize_t base = group_offset + c * spatial;
                 for (ssize_t s = 0; s < spatial; ++s) {
                     mean += input_ptr[base + s];
                 }
@@ -27,7 +27,7 @@
             mean /= group_size;
             {{ c_type }} var = 0;
             for (ssize_t c = 0; c < channels_per_group; ++c) {
-                const int64_t base = group_offset + c * spatial;
+                const ssize_t base = group_offset + c * spatial;
                 for (ssize_t s = 0; s < spatial; ++s) {
                     {{ c_type }} diff = input_ptr[base + s] - mean;
                     var += diff * diff;
@@ -36,7 +36,7 @@
             var /= group_size;
             {{ c_type }} rstd = ({{ c_type }})1 / {{ sqrt_fn }}(var + {{ eps }});
             for (ssize_t c = 0; c < channels_per_group; ++c) {
-                const int64_t channel = c_start + c;
+                const ssize_t channel = c_start + c;
 {% if has_weight %}
                 {{ c_type }} w = weight_ptr[channel];
 {% else %}
@@ -47,7 +47,7 @@
 {% else %}
                 {{ c_type }} b = 0;
 {% endif %}
-                const int64_t base = (n * channels + channel) * spatial;
+                const ssize_t base = (n * channels + channel) * spatial;
                 for (ssize_t s = 0; s < spatial; ++s) {
                     {{ c_type }} val = (input_ptr[base + s] - mean) * rstd;
                     out_ptr[base + s] = val * w + b;

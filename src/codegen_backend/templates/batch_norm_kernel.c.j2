@@ -5,7 +5,7 @@
     {{ c_type }} sumsq = {{ zero_literal }};
     for (ssize_t n = 0; n < {{ batch }}; ++n) {
       for (ssize_t i = 0; i < {{ inner_size }}; ++i) {
-        int64_t idx = (n * {{ channels }} + c) * {{ inner_size }} + i;
+        ssize_t idx = (n * {{ channels }} + c) * {{ inner_size }} + i;
         {{ c_type }} value = (({{ c_type }}*)input)[idx];
         sum += value;
         sumsq += value * value;
@@ -31,7 +31,7 @@
 {% endif %}
     for (ssize_t n = 0; n < {{ batch }}; ++n) {
       for (ssize_t i = 0; i < {{ inner_size }}; ++i) {
-        int64_t idx = (n * {{ channels }} + c) * {{ inner_size }} + i;
+        ssize_t idx = (n * {{ channels }} + c) * {{ inner_size }} + i;
         {{ c_type }} value = (({{ c_type }}*)input)[idx];
         (({{ c_type }}*)out)[idx] = (value - mean) * inv * scale + offset;
       }
