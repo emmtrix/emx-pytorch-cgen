@@ -54,6 +54,10 @@ def build_supported_ops() -> dict[str, _OpSpec]:
         torch.ops.aten.squeeze.dim,
         torch.ops.aten.squeeze.dims,
     ).build()
+    registry.register_op("repeat", kind=OpKind.REPEAT).targets(
+        torch.ops.aten.repeat.default,
+        torch.ops.aten.repeat,
+    ).build()
     registry.register_op("cat", kind=OpKind.CONCAT).targets(
         torch.cat,
         torch.ops.aten.cat.default,
@@ -178,6 +182,14 @@ def build_supported_ops() -> dict[str, _OpSpec]:
     registry.register_op("_cdist_forward", kind=OpKind.CDIST).targets(
         torch.ops.aten._cdist_forward,
         torch.ops.aten._cdist_forward.default,
+    ).build()
+    registry.register_op("nonzero", kind=OpKind.NONZERO).targets(
+        torch.nonzero,
+        torch.ops.aten.nonzero,
+        torch.ops.aten.nonzero.default,
+    registry.register_op("native_dropout", kind=OpKind.DROPOUT).targets(
+        torch.ops.aten.native_dropout,
+        torch.ops.aten.native_dropout.default,
     ).build()
 
     return registry.build()
