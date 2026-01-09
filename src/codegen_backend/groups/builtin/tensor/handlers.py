@@ -1593,7 +1593,9 @@ class _BackendEmptyStridedHandler(EmptyStridedHandler):
                     f"codegen {op_spec.name} expects {name} to be False"
                 )
         output_shape = parse_resize_size(op_spec.name, size_arg)
-        output_strides = parse_empty_strided_stride(op_spec.name, stride_arg)
+        output_strides = parse_empty_strided_stride(
+            op_spec.name, stride_arg, size=output_shape
+        )
         if len(output_shape) != len(output_strides):
             raise CodegenBackendError(
                 f"codegen {op_spec.name} expects size and stride to match length"
