@@ -215,7 +215,6 @@ class ScalarFunctionKey:
 FLOAT_ONLY_OPS = frozenset(
     [
         "abs",
-        "absolute",
         "add",
         "sub",
         "mul",
@@ -262,14 +261,10 @@ FLOAT_ONLY_OPS = frozenset(
         "tanh",
         "log",
         "acos",
-        "arccos",
         "acosh",
         "asin",
-        "arcsin",
         "asinh",
-        "arcsinh",
         "atan",
-        "arctan",
         "atanh",
         "cosh",
         "sinh",
@@ -327,7 +322,6 @@ COMMON_BASE_OPS = frozenset(
     [
         "from_f32",
         "abs",
-        "absolute",
         "add",
         "sub",
         "mul",
@@ -407,15 +401,11 @@ BOOL_BASE_OPS = COMMON_BASE_OPS | BOOL_ONLY_OPS
 COMMON_UNARY_FROM_F32_OPS = frozenset(
     [
         "acos",
-        "arccos",
         "acosh",
         "angle",
         "asin",
-        "arcsin",
         "asinh",
-        "arcsinh",
         "atan",
-        "arctan",
         "atanh",
         "cbrt",
         "cos",
@@ -468,7 +458,6 @@ COMMON_UNARY_FROM_F32_OPS = frozenset(
 BOOL_ONLY_UNARY_FROM_F32_OPS = frozenset(
     [
         "abs",
-        "absolute",
         "neg",
         "reciprocal",
         "relu",
@@ -535,7 +524,7 @@ INT_BINARY_FROM_F32_OPS = COMMON_BINARY_FROM_F32_OPS
 BOOL_BINARY_FROM_F32_OPS = COMMON_BINARY_FROM_F32_OPS | BOOL_ONLY_BINARY_FROM_F32_OPS
 
 
-_FLOAT_ALIASES = {
+_OP_ALIASES = {
     "absolute": "abs",
     "arccos": "acos",
     "arcsin": "asin",
@@ -569,6 +558,10 @@ def _math_fn(base: str, dtype_info: _ScalarTypeInfo) -> str:
     if dtype_info.suffix == "f32" and base not in _NO_SUFFIX_MATH:
         return f"{base}f"
     return base
+
+
+def _normalize_op_name(op_name: str) -> str:
+    return _OP_ALIASES.get(op_name, op_name)
 
 
 def _cast_value(expr: str, dtype_info: _ScalarTypeInfo) -> str:
@@ -1191,17 +1184,18 @@ def _float_clamp_max(dtype_info: _ScalarTypeInfo) -> _GeneratedScalar:
 
 
 def _float_from_ops(dtype_info: _ScalarTypeInfo, name: str) -> _GeneratedScalar:
-    if name == "abs":
-        return _float_unary_math(dtype_info, "abs", "fabs")
-    if name in _FLOAT_ALIASES:
-        target = _FLOAT_ALIASES[name]
+    canonical_name = _normalize_op_name(name)
+    if canonical_name != name:
         lines = [
             f"static inline {dtype_info.c_type} {dtype_info.prefix}{name}({dtype_info.c_type} a) {{",
-            f"    return {dtype_info.prefix}{target}(a);",
+            f"    return {dtype_info.prefix}{canonical_name}(a);",
             "}",
         ]
-        deps = {f"{dtype_info.prefix}{target}"}
+        deps = {f"{dtype_info.prefix}{canonical_name}"}
         return _GeneratedScalar(lines=lines, deps=deps, includes=set())
+    name = canonical_name
+    if name == "abs":
+        return _float_unary_math(dtype_info, "abs", "fabs")
     if name in {"add", "sub", "mul", "div"}:
         op = {"add": "+", "sub": "-", "mul": "*", "div": "/"}[name]
         return _simple_binary(dtype_info, name, f"a {op} b")
@@ -2091,7 +2085,7 @@ def _parse_scalar_name(function_name: str) -> tuple[_ScalarTypeInfo, str]:
 
 def _generate_scalar(function_name: str) -> _GeneratedScalar:
     dtype_info, op_name = _parse_scalar_name(function_name)
-    if op_name not in _supported_ops(dtype_info):
+    if _normalize_op_name(op_name) not in _supported_ops(dtype_info):
         raise CodegenBackendError(f"unsupported scalar op {op_name} for {dtype_info.suffix}")
     if dtype_info.is_float:
         generated = _float_from_ops(dtype_info, op_name)
