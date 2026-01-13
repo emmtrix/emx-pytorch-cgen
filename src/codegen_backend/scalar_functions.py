@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Dict, Iterable, List, Set
+from enum import Enum
+from typing import Dict, List, Mapping, Set
 
 import torch
 
@@ -27,6 +28,188 @@ class _GeneratedScalar:
     lines: List[str]
     deps: Set[str]
     includes: Set[str]
+
+
+class ScalarType(str, Enum):
+    F32 = "f32"
+    F64 = "f64"
+    I8 = "i8"
+    I16 = "i16"
+    I32 = "i32"
+    I64 = "i64"
+    U8 = "u8"
+    U16 = "u16"
+    U32 = "u32"
+    U64 = "u64"
+    BOOL = "bool"
+
+    @classmethod
+    def from_torch_dtype(cls, dtype: torch.dtype) -> "ScalarType":
+        mapping = {
+            torch.float32: cls.F32,
+            torch.float64: cls.F64,
+            torch.int8: cls.I8,
+            torch.int16: cls.I16,
+            torch.int32: cls.I32,
+            torch.int64: cls.I64,
+            torch.uint8: cls.U8,
+            torch.uint16: cls.U16,
+            torch.uint32: cls.U32,
+            torch.uint64: cls.U64,
+            torch.bool: cls.BOOL,
+        }
+        try:
+            return mapping[dtype]
+        except KeyError as exc:
+            raise CodegenBackendError(
+                f"unsupported torch dtype for scalar functions: {dtype}"
+            ) from exc
+
+
+class ScalarFunction(str, Enum):
+    ABS = "abs"
+    ABSOLUTE = "absolute"
+    ACOS = "acos"
+    ACOSH = "acosh"
+    ADD = "add"
+    ANGLE = "angle"
+    ARCCOS = "arccos"
+    ARCSIN = "arcsin"
+    ARCSINH = "arcsinh"
+    ARCTAN = "arctan"
+    ASIN = "asin"
+    ASINH = "asinh"
+    ATAN = "atan"
+    ATAN2 = "atan2"
+    ATANH = "atanh"
+    BITWISE_AND = "bitwise_and"
+    BITWISE_LEFT_SHIFT = "bitwise_left_shift"
+    BITWISE_NOT = "bitwise_not"
+    BITWISE_OR = "bitwise_or"
+    BITWISE_RIGHT_SHIFT = "bitwise_right_shift"
+    BITWISE_XOR = "bitwise_xor"
+    CBRT = "cbrt"
+    CEIL = "ceil"
+    CLAMP_MAX = "clamp_max"
+    CLAMP_MIN = "clamp_min"
+    CONJ = "conj"
+    CONJ_PHYSICAL = "conj_physical"
+    COPYSIGN = "copysign"
+    COS = "cos"
+    COSH = "cosh"
+    DEG2RAD = "deg2rad"
+    DIGAMMA = "digamma"
+    DIV = "div"
+    ELU = "elu"
+    EQ = "eq"
+    ERF = "erf"
+    ERFC = "erfc"
+    ERFINV = "erfinv"
+    EXP = "exp"
+    EXP2 = "exp2"
+    EXPM1 = "expm1"
+    FLOOR = "floor"
+    FLOOR_DIVIDE = "floor_divide"
+    FMAX = "fmax"
+    FMIN = "fmin"
+    FMOD = "fmod"
+    FRAC = "frac"
+    GE = "ge"
+    GELU = "gelu"
+    GT = "gt"
+    HARDSIGMOID = "hardsigmoid"
+    HARDSWISH = "hardswish"
+    HEAVISIDE = "heaviside"
+    HYPOT = "hypot"
+    I0 = "i0"
+    ISFINITE = "isfinite"
+    ISINF = "isinf"
+    ISNAN = "isnan"
+    ISNEGINF = "isneginf"
+    ISPOSINF = "isposinf"
+    LDEXP = "ldexp"
+    LE = "le"
+    LEAKY_RELU = "leaky_relu"
+    LGAMMA = "lgamma"
+    LOG = "log"
+    LOG10 = "log10"
+    LOG1P = "log1p"
+    LOG2 = "log2"
+    LOG_SIGMOID = "log_sigmoid"
+    LOGADDEXP = "logaddexp"
+    LOGADDEXP2 = "logaddexp2"
+    LOGICAL_AND = "logical_and"
+    LOGICAL_NOT = "logical_not"
+    LOGICAL_OR = "logical_or"
+    LOGICAL_XOR = "logical_xor"
+    LOGIT = "logit"
+    LT = "lt"
+    MAXIMUM = "maximum"
+    MINIMUM = "minimum"
+    MISH = "mish"
+    MUL = "mul"
+    NAN_TO_NUM = "nan_to_num"
+    NE = "ne"
+    NEG = "neg"
+    NEXTAFTER = "nextafter"
+    POSITIVE = "positive"
+    POW = "pow"
+    RAD2DEG = "rad2deg"
+    REAL = "real"
+    RECIPROCAL = "reciprocal"
+    RELU = "relu"
+    RELU6 = "relu6"
+    REMAINDER = "remainder"
+    ROUND = "round"
+    RSQRT = "rsqrt"
+    SELU = "selu"
+    SGN = "sgn"
+    SIGMOID = "sigmoid"
+    SIGN = "sign"
+    SILU = "silu"
+    SIN = "sin"
+    SINC = "sinc"
+    SINH = "sinh"
+    SOFTPLUS = "softplus"
+    SQRT = "sqrt"
+    SQUARE = "square"
+    SUB = "sub"
+    TAN = "tan"
+    TANH = "tanh"
+    TRUNC = "trunc"
+    XLOGY = "xlogy"
+    CONVERT_FROM_F32 = "convert_from_f32"
+    CONVERT_FROM_F64 = "convert_from_f64"
+    CONVERT_FROM_I8 = "convert_from_i8"
+    CONVERT_FROM_I16 = "convert_from_i16"
+    CONVERT_FROM_I32 = "convert_from_i32"
+    CONVERT_FROM_I64 = "convert_from_i64"
+    CONVERT_FROM_U8 = "convert_from_u8"
+    CONVERT_FROM_U16 = "convert_from_u16"
+    CONVERT_FROM_U32 = "convert_from_u32"
+    CONVERT_FROM_U64 = "convert_from_u64"
+    CONVERT_FROM_BOOL = "convert_from_bool"
+
+    @classmethod
+    def from_op_name(cls, op_name: str) -> "ScalarFunction":
+        try:
+            return cls(op_name)
+        except ValueError as exc:
+            raise CodegenBackendError(
+                f"unknown scalar function op name: {op_name}"
+            ) from exc
+
+
+@dataclass(frozen=True)
+class ScalarFunctionKey:
+    function: ScalarFunction
+    return_type: ScalarType
+
+    @classmethod
+    def for_torch_dtype(
+        cls, function: ScalarFunction, dtype: torch.dtype
+    ) -> "ScalarFunctionKey":
+        return cls(function=function, return_type=ScalarType.from_torch_dtype(dtype))
 
 
 _FLOAT_OPS = [
@@ -1882,6 +2065,36 @@ _SCALAR_TYPES: Dict[torch.dtype, _ScalarTypeInfo] = {
 }
 
 
+_SCALAR_TYPE_BY_ENUM: Mapping[ScalarType, _ScalarTypeInfo] = {
+    ScalarType.F32: _SCALAR_TYPES[torch.float32],
+    ScalarType.F64: _SCALAR_TYPES[torch.float64],
+    ScalarType.I8: _SCALAR_TYPES[torch.int8],
+    ScalarType.I16: _SCALAR_TYPES[torch.int16],
+    ScalarType.I32: _SCALAR_TYPES[torch.int32],
+    ScalarType.I64: _SCALAR_TYPES[torch.int64],
+    ScalarType.U8: _SCALAR_TYPES[torch.uint8],
+    ScalarType.U16: _SCALAR_TYPES[torch.uint16],
+    ScalarType.U32: _SCALAR_TYPES[torch.uint32],
+    ScalarType.U64: _SCALAR_TYPES[torch.uint64],
+    ScalarType.BOOL: _SCALAR_TYPES[torch.bool],
+}
+
+
+_CONVERSION_SOURCE_BY_FUNCTION: Mapping[ScalarFunction, ScalarType] = {
+    ScalarFunction.CONVERT_FROM_F32: ScalarType.F32,
+    ScalarFunction.CONVERT_FROM_F64: ScalarType.F64,
+    ScalarFunction.CONVERT_FROM_I8: ScalarType.I8,
+    ScalarFunction.CONVERT_FROM_I16: ScalarType.I16,
+    ScalarFunction.CONVERT_FROM_I32: ScalarType.I32,
+    ScalarFunction.CONVERT_FROM_I64: ScalarType.I64,
+    ScalarFunction.CONVERT_FROM_U8: ScalarType.U8,
+    ScalarFunction.CONVERT_FROM_U16: ScalarType.U16,
+    ScalarFunction.CONVERT_FROM_U32: ScalarType.U32,
+    ScalarFunction.CONVERT_FROM_U64: ScalarType.U64,
+    ScalarFunction.CONVERT_FROM_BOOL: ScalarType.BOOL,
+}
+
+
 def _supported_ops(dtype_info: _ScalarTypeInfo) -> Set[str]:
     if dtype_info.is_float:
         return set(_FLOAT_OPS)
@@ -1942,13 +2155,61 @@ def _generate_scalar(function_name: str) -> _GeneratedScalar:
     return _GeneratedScalar(lines=generated.lines, deps=generated.deps, includes=includes)
 
 
+def _function_name_for_key(key: ScalarFunctionKey) -> str:
+    if key.function in _CONVERSION_SOURCE_BY_FUNCTION:
+        source_type = _CONVERSION_SOURCE_BY_FUNCTION[key.function]
+        if source_type == ScalarType.F32:
+            if key.return_type in {
+                ScalarType.I8,
+                ScalarType.I16,
+                ScalarType.I32,
+                ScalarType.I64,
+                ScalarType.U8,
+                ScalarType.U16,
+                ScalarType.U32,
+                ScalarType.U64,
+                ScalarType.BOOL,
+            }:
+                target_info = _SCALAR_TYPE_BY_ENUM[key.return_type]
+                return f"{target_info.prefix}from_f32"
+            raise CodegenBackendError(
+                f"unsupported scalar conversion from {source_type.value} to {key.return_type.value}"
+            )
+        if source_type == ScalarType.BOOL:
+            if key.return_type == ScalarType.F32:
+                source_info = _SCALAR_TYPE_BY_ENUM[source_type]
+                return f"{source_info.prefix}to_f32"
+            raise CodegenBackendError(
+                f"unsupported scalar conversion from {source_type.value} to {key.return_type.value}"
+            )
+        raise CodegenBackendError(
+            f"unsupported scalar conversion from {source_type.value} to {key.return_type.value}"
+        )
+    op_name = key.function.value
+    dtype_info = _SCALAR_TYPE_BY_ENUM[key.return_type]
+    if op_name not in _supported_ops(dtype_info):
+        raise CodegenBackendError(
+            f"unsupported scalar op {op_name} for {dtype_info.suffix}"
+        )
+    return f"{dtype_info.prefix}{op_name}"
+
+
 class ScalarFunctionRegistry:
     def __init__(self) -> None:
         self._requested: List[str] = []
         self._requested_set: Set[str] = set()
+        self._key_to_name: Dict[ScalarFunctionKey, str] = {}
         self._generated: Dict[str, _GeneratedScalar] = {}
 
-    def register(self, function_name: str) -> None:
+    def request(self, key: ScalarFunctionKey) -> str:
+        name = self._key_to_name.get(key)
+        if name is None:
+            name = _function_name_for_key(key)
+            self._key_to_name[key] = name
+        self._register_name(name)
+        return name
+
+    def _register_name(self, function_name: str) -> None:
         if function_name in self._requested_set:
             return
         _parse_scalar_name(function_name)

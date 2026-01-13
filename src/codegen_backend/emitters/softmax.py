@@ -11,6 +11,11 @@ from codegen_backend.emitters.base import (
 )
 from codegen_backend.indexing import _emit_strided_access, _format_output_access
 from codegen_backend.kinds import KernelEmitRequest
+from codegen_backend.scalar_functions import (
+    ScalarFunction,
+    ScalarFunctionKey,
+    ScalarType,
+)
 from codegen_backend.specs import _OpSpec
 from codegen_backend.templates import get_template_env
 
@@ -23,6 +28,8 @@ def _write_softmax_kernel(
     output_strides: Sequence[int],
     softmax_dim: int | None,
     dtype: _CodegenDType,
+    exp_fn: str,
+    log_fn: str,
 ) -> List[str]:
     if softmax_dim is None:
         raise CodegenBackendError("codegen softmax expects a reduction dimension")
@@ -82,8 +89,8 @@ def _write_softmax_kernel(
         input_access_current=input_access_current,
         output_access=output_access,
         is_log=op_spec.name in {"log_softmax", "_log_softmax"},
-        exp_fn=f"{dtype.scalar_prefix}exp",
-        log_fn=f"{dtype.scalar_prefix}log",
+        exp_fn=exp_fn,
+        log_fn=log_fn,
     )
     return rendered.strip().splitlines()
 
@@ -94,10 +101,17 @@ class SoftmaxEmitter(KindEmitterBase):
         dtype = req.dtype
         if op_spec is None or dtype is None:
             raise CodegenBackendError("softmax requires op spec and dtype")
+        exp_fn = f"{dtype.scalar_prefix}exp"
+        log_fn = f"{dtype.scalar_prefix}log"
         if req.scalar_registry is not None:
-            req.scalar_registry.register(f"{dtype.scalar_prefix}exp")
+            return_type = ScalarType.from_torch_dtype(dtype.torch_dtype)
+            exp_fn = req.scalar_registry.request(
+                ScalarFunctionKey(ScalarFunction.EXP, return_type)
+            )
             if op_spec.name in {"log_softmax", "_log_softmax"}:
-                req.scalar_registry.register(f"{dtype.scalar_prefix}log")
+                log_fn = req.scalar_registry.request(
+                    ScalarFunctionKey(ScalarFunction.LOG, return_type)
+                )
         return _write_softmax_kernel(
             req.node_index,
             op_spec,
@@ -106,4 +120,6 @@ class SoftmaxEmitter(KindEmitterBase):
             req.output_strides or (),
             int(req.params["dim"]) if req.params.get("dim") is not None else None,
             dtype,
+            exp_fn,
+            log_fn,
         )

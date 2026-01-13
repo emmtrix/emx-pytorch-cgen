@@ -7,6 +7,11 @@ from codegen_backend.c_types import _format_scalar_literal
 from codegen_backend.dtypes import _CodegenDType
 from codegen_backend.emitters.base import KindEmitterBase, _format_array_suffix
 from codegen_backend.kinds import KernelEmitRequest
+from codegen_backend.scalar_functions import (
+    ScalarFunction,
+    ScalarFunctionKey,
+    ScalarType,
+)
 from codegen_backend.specs import _OpSpec
 from codegen_backend.templates import get_template_env
 
@@ -17,6 +22,7 @@ def _write_batch_norm_kernel(
     input_shape: Sequence[int],
     output_shape: Sequence[int],
     dtype: _CodegenDType,
+    sqrt_fn: str,
     eps: float,
     momentum: float,
     training: bool,
@@ -55,7 +61,7 @@ def _write_batch_norm_kernel(
         has_bias=has_bias,
         one_literal=_format_scalar_literal(1.0, dtype),
         zero_literal=_format_scalar_literal(0.0, dtype),
-        sqrt_fn=f"{dtype.scalar_prefix}sqrt",
+        sqrt_fn=sqrt_fn,
     )
     return rendered.strip().splitlines()
 
@@ -66,14 +72,21 @@ class BatchNormEmitter(KindEmitterBase):
         dtype = req.dtype
         if op_spec is None or dtype is None:
             raise CodegenBackendError("batch_norm requires op spec and dtype")
+        sqrt_fn = f"{dtype.scalar_prefix}sqrt"
         if req.scalar_registry is not None:
-            req.scalar_registry.register(f"{dtype.scalar_prefix}sqrt")
+            sqrt_fn = req.scalar_registry.request(
+                ScalarFunctionKey(
+                    ScalarFunction.SQRT,
+                    ScalarType.from_torch_dtype(dtype.torch_dtype),
+                )
+            )
         return _write_batch_norm_kernel(
             req.node_index,
             op_spec,
             req.input_shapes[0],
             req.output_shape,
             dtype,
+            sqrt_fn,
             float(req.params.get("eps", 1e-5)),
             float(req.params.get("momentum", 0.1)),
             bool(req.params.get("training", False)),

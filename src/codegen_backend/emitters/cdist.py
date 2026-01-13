@@ -13,6 +13,11 @@ from codegen_backend.emitters.base import (
 )
 from codegen_backend.indexing import _contiguous_strides, _emit_strided_access
 from codegen_backend.kinds import KernelEmitRequest
+from codegen_backend.scalar_functions import (
+    ScalarFunction,
+    ScalarFunctionKey,
+    ScalarType,
+)
 from codegen_backend.specs import _OpSpec
 from codegen_backend.templates import get_template_env
 
@@ -48,6 +53,10 @@ def _write_cdist_kernel(
     output_shape: Sequence[int],
     output_strides: Sequence[int],
     dtype: _CodegenDType,
+    sqrt_fn: str,
+    abs_fn: str,
+    max_fn: str,
+    pow_fn: str,
     *,
     p_value: float,
     compute_mode: str | None,
@@ -90,10 +99,10 @@ def _write_cdist_kernel(
         m=m,
         r=r,
         c_type=dtype.c_type,
-        sqrt_fn=f"{dtype.scalar_prefix}sqrt",
-        abs_fn=f"{dtype.scalar_prefix}abs",
-        max_fn=f"{dtype.scalar_prefix}fmax",
-        pow_fn=f"{dtype.scalar_prefix}pow",
+        sqrt_fn=sqrt_fn,
+        abs_fn=abs_fn,
+        max_fn=max_fn,
+        pow_fn=pow_fn,
         x1_access=_format_strided_access(
             "x1",
             x1_shape,
@@ -142,6 +151,10 @@ class CdistEmitter(KindEmitterBase):
             raise CodegenBackendError("cdist requires op spec and dtype")
         p_value = float(req.params.get("p", 2.0))
         compute_mode = req.params.get("compute_mode")
+        sqrt_fn = f"{dtype.scalar_prefix}sqrt"
+        abs_fn = f"{dtype.scalar_prefix}abs"
+        max_fn = f"{dtype.scalar_prefix}fmax"
+        pow_fn = f"{dtype.scalar_prefix}pow"
         if req.scalar_registry is not None:
             p_zero = math.isclose(p_value, 0.0)
             p_two = math.isclose(p_value, 2.0)
@@ -150,14 +163,25 @@ class CdistEmitter(KindEmitterBase):
                 "use_mm_for_euclid_dist",
                 "use_mm_for_euclid_dist_if_necessary",
             )
+            return_type = ScalarType.from_torch_dtype(dtype.torch_dtype)
             if use_mm or p_two:
-                req.scalar_registry.register(f"{dtype.scalar_prefix}sqrt")
+                sqrt_fn = req.scalar_registry.request(
+                    ScalarFunctionKey(ScalarFunction.SQRT, return_type)
+                )
             elif p_inf:
-                req.scalar_registry.register(f"{dtype.scalar_prefix}abs")
-                req.scalar_registry.register(f"{dtype.scalar_prefix}fmax")
+                abs_fn = req.scalar_registry.request(
+                    ScalarFunctionKey(ScalarFunction.ABS, return_type)
+                )
+                max_fn = req.scalar_registry.request(
+                    ScalarFunctionKey(ScalarFunction.FMAX, return_type)
+                )
             elif not p_zero:
-                req.scalar_registry.register(f"{dtype.scalar_prefix}abs")
-                req.scalar_registry.register(f"{dtype.scalar_prefix}pow")
+                abs_fn = req.scalar_registry.request(
+                    ScalarFunctionKey(ScalarFunction.ABS, return_type)
+                )
+                pow_fn = req.scalar_registry.request(
+                    ScalarFunctionKey(ScalarFunction.POW, return_type)
+                )
         output_strides = req.output_strides
         if output_strides is None:
             output_strides = _contiguous_strides(req.output_shape)
@@ -171,6 +195,10 @@ class CdistEmitter(KindEmitterBase):
             req.output_shape,
             output_strides,
             dtype,
+            sqrt_fn,
+            abs_fn,
+            max_fn,
+            pow_fn,
             p_value=p_value,
             compute_mode=compute_mode,
         )

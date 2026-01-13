@@ -13,6 +13,11 @@ from codegen_backend.emitters.base import (
     emit_signature,
 )
 from codegen_backend.kinds import KernelEmitRequest
+from codegen_backend.scalar_functions import (
+    ScalarFunction,
+    ScalarFunctionKey,
+    ScalarType,
+)
 from codegen_backend.templates import get_template_env
 
 _PARAMETRIC_UNARY_OPS = {
@@ -44,6 +49,7 @@ class ElementwiseEmitter(KindEmitterBase):
         elementwise_template = get_template_env().get_template(
             "elementwise_kernel.c.j2"
         )
+        return_type = ScalarType.from_torch_dtype(req.dtype.torch_dtype)
         params = req.params
         signature_kind = params.get("signature_kind", "unary")
         signature = emit_signature(
@@ -67,6 +73,12 @@ class ElementwiseEmitter(KindEmitterBase):
             req.output_shape, req.output_strides, c_type=req.dtype.c_type
         )
         scalar_fn = f"{req.dtype.scalar_prefix}{op_spec.name}"
+        scalar_function = None
+        if registry is not None:
+            try:
+                scalar_function = ScalarFunction.from_op_name(op_spec.name)
+            except CodegenBackendError:
+                scalar_function = None
         op_kind = op_spec.kind.value
         if elementwise_kind == "clamp_tensor":
             op_kind = "clamp_tensor"
@@ -292,23 +304,43 @@ class ElementwiseEmitter(KindEmitterBase):
             if registry is not None:
                 if op_spec.name == "gelu":
                     if params.get("approximate", "none") == "tanh":
-                        registry.register(context["tanh_fn"])
+                        context["tanh_fn"] = registry.request(
+                            ScalarFunctionKey(ScalarFunction.TANH, return_type)
+                        )
                     else:
-                        registry.register(context["erf_fn"])
+                        context["erf_fn"] = registry.request(
+                            ScalarFunctionKey(ScalarFunction.ERF, return_type)
+                        )
                 elif op_spec.name == "elu":
-                    registry.register(context["exp_fn"])
+                    context["exp_fn"] = registry.request(
+                        ScalarFunctionKey(ScalarFunction.EXP, return_type)
+                    )
                 elif op_spec.name == "softplus":
-                    registry.register(context["exp_fn"])
-                    registry.register(context["log1p_fn"])
+                    context["exp_fn"] = registry.request(
+                        ScalarFunctionKey(ScalarFunction.EXP, return_type)
+                    )
+                    context["log1p_fn"] = registry.request(
+                        ScalarFunctionKey(ScalarFunction.LOG1P, return_type)
+                    )
                 elif op_spec.name in {"clamp", "hardtanh"}:
-                    registry.register(context["fmin_fn"])
-                    registry.register(context["fmax_fn"])
+                    context["fmin_fn"] = registry.request(
+                        ScalarFunctionKey(ScalarFunction.FMIN, return_type)
+                    )
+                    context["fmax_fn"] = registry.request(
+                        ScalarFunctionKey(ScalarFunction.FMAX, return_type)
+                    )
             if registry is not None and op_spec.name not in _PARAMETRIC_UNARY_OPS:
-                if not context["is_alias"]:
-                    registry.register(scalar_fn)
+                if not context["is_alias"] and scalar_function is not None:
+                    scalar_fn = registry.request(
+                        ScalarFunctionKey(scalar_function, return_type)
+                    )
+                    context["scalar_fn"] = scalar_fn
         if registry is not None and elementwise_kind == "binary":
-            if not context["is_copy"]:
-                registry.register(scalar_fn)
+            if not context["is_copy"] and scalar_function is not None:
+                scalar_fn = registry.request(
+                    ScalarFunctionKey(scalar_function, return_type)
+                )
+                context["scalar_fn"] = scalar_fn
         rendered = elementwise_template.render(**context)
         return rendered.strip().splitlines()
 
