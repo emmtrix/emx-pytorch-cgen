@@ -4,15 +4,13 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, List, Mapping, Set
 
-import torch
 
-from codegen_backend.dtypes import _CODEGEN_DTYPES
-from codegen_backend.errors import CodegenBackendError
+class ScalarFunctionError(RuntimeError):
+    pass
 
 
 @dataclass(frozen=True)
 class _ScalarTypeInfo:
-    torch_dtype: torch.dtype
     c_type: str
     prefix: str
     suffix: str
@@ -44,25 +42,34 @@ class ScalarType(str, Enum):
     BOOL = "bool"
 
     @classmethod
-    def from_torch_dtype(cls, dtype: torch.dtype) -> "ScalarType":
+    def from_torch_dtype(cls, dtype: object) -> "ScalarType":
+        if isinstance(dtype, ScalarType):
+            return dtype
+        if isinstance(dtype, str):
+            dtype_name = dtype
+        else:
+            dtype_name = getattr(dtype, "name", None) or str(dtype)
+        normalized = dtype_name.lower()
+        if normalized.startswith("torch."):
+            normalized = normalized[len("torch.") :]
         mapping = {
-            torch.float32: cls.F32,
-            torch.float64: cls.F64,
-            torch.int8: cls.I8,
-            torch.int16: cls.I16,
-            torch.int32: cls.I32,
-            torch.int64: cls.I64,
-            torch.uint8: cls.U8,
-            torch.uint16: cls.U16,
-            torch.uint32: cls.U32,
-            torch.uint64: cls.U64,
-            torch.bool: cls.BOOL,
+            "float32": cls.F32,
+            "float64": cls.F64,
+            "int8": cls.I8,
+            "int16": cls.I16,
+            "int32": cls.I32,
+            "int64": cls.I64,
+            "uint8": cls.U8,
+            "uint16": cls.U16,
+            "uint32": cls.U32,
+            "uint64": cls.U64,
+            "bool": cls.BOOL,
         }
         try:
-            return mapping[dtype]
+            return mapping[normalized]
         except KeyError as exc:
-            raise CodegenBackendError(
-                f"unsupported torch dtype for scalar functions: {dtype}"
+            raise ScalarFunctionError(
+                f"unsupported dtype for scalar functions: {dtype_name}"
             ) from exc
 
 
@@ -299,7 +306,7 @@ class ScalarFunction(str, Enum):
         try:
             return cls(op_name)
         except ValueError as exc:
-            raise CodegenBackendError(
+            raise ScalarFunctionError(
                 f"unknown scalar function op name: {op_name}"
             ) from exc
 
@@ -311,7 +318,7 @@ class ScalarFunctionKey:
 
     @classmethod
     def for_torch_dtype(
-        cls, function: ScalarFunction, dtype: torch.dtype
+        cls, function: ScalarFunction, dtype: object
     ) -> "ScalarFunctionKey":
         return cls(function=function, return_type=ScalarType.from_torch_dtype(dtype))
 
@@ -1136,7 +1143,7 @@ def _float_from_ops(dtype_info: _ScalarTypeInfo, name: str) -> _GeneratedScalar:
         return _float_sinc(dtype_info)
     if name == "square":
         return _float_square(dtype_info)
-    raise CodegenBackendError(f"unsupported float scalar op: {name}")
+    raise ScalarFunctionError(f"unsupported float scalar op: {name}")
 
 
 def _int_from_f32(dtype_info: _ScalarTypeInfo) -> _GeneratedScalar:
@@ -1580,7 +1587,7 @@ def _int_from_ops(dtype_info: _ScalarTypeInfo, name: str) -> _GeneratedScalar:
         return _int_sgn(dtype_info)
     if name == "square":
         return _int_square(dtype_info)
-    raise CodegenBackendError(f"unsupported int scalar op: {name}")
+    raise ScalarFunctionError(f"unsupported int scalar op: {name}")
 
 
 def _bool_to_f32() -> _GeneratedScalar:
@@ -1646,7 +1653,7 @@ def _bool_binary_from_f32(name: str) -> _GeneratedScalar:
 def _bool_from_ops(name: str) -> _GeneratedScalar:
     canonical_name = _normalize_op_name(name)
     if canonical_name != name:
-        dtype_info = _SCALAR_TYPES[torch.bool]
+        dtype_info = _SCALAR_TYPES[ScalarType.BOOL]
         lines = [
             f"static inline {dtype_info.c_type} {dtype_info.prefix}{name}({dtype_info.c_type} a) {{",
             f"    return {dtype_info.prefix}{canonical_name}(a);",
@@ -1660,21 +1667,21 @@ def _bool_from_ops(name: str) -> _GeneratedScalar:
     if name == "from_f32":
         return _bool_from_f32()
     if name == "bitwise_and":
-        return _simple_binary(_SCALAR_TYPES[torch.bool], name, "a & b")
+        return _simple_binary(_SCALAR_TYPES[ScalarType.BOOL], name, "a & b")
     if name == "bitwise_or":
-        return _simple_binary(_SCALAR_TYPES[torch.bool], name, "a | b")
+        return _simple_binary(_SCALAR_TYPES[ScalarType.BOOL], name, "a | b")
     if name == "bitwise_xor":
-        return _simple_binary(_SCALAR_TYPES[torch.bool], name, "a ^ b")
+        return _simple_binary(_SCALAR_TYPES[ScalarType.BOOL], name, "a ^ b")
     if name == "bitwise_not":
-        return _bool_bitwise_not(_SCALAR_TYPES[torch.bool])
+        return _bool_bitwise_not(_SCALAR_TYPES[ScalarType.BOOL])
     if name == "logical_or":
-        return _bool_logical(_SCALAR_TYPES[torch.bool], name, "a || b")
+        return _bool_logical(_SCALAR_TYPES[ScalarType.BOOL], name, "a || b")
     if name == "logical_and":
-        return _bool_logical(_SCALAR_TYPES[torch.bool], name, "a && b")
+        return _bool_logical(_SCALAR_TYPES[ScalarType.BOOL], name, "a && b")
     if name == "logical_xor":
-        return _bool_logical(_SCALAR_TYPES[torch.bool], name, "a != b")
+        return _bool_logical(_SCALAR_TYPES[ScalarType.BOOL], name, "a != b")
     if name == "logical_not":
-        return _bool_logical_not(_SCALAR_TYPES[torch.bool])
+        return _bool_logical_not(_SCALAR_TYPES[ScalarType.BOOL])
     if name in {"le", "lt", "ge", "gt", "eq", "ne"}:
         op = {
             "le": "<=",
@@ -1684,131 +1691,120 @@ def _bool_from_ops(name: str) -> _GeneratedScalar:
             "eq": "==",
             "ne": "!=",
         }[name]
-        return _bool_comparison(_SCALAR_TYPES[torch.bool], name, op)
+        return _bool_comparison(_SCALAR_TYPES[ScalarType.BOOL], name, op)
     function = ScalarFunction.from_op_name(name)
     if function.bool_from_f32_arity == 1:
         return _bool_unary_from_f32(name)
     if function.bool_from_f32_arity == 2:
         return _bool_binary_from_f32(name)
-    raise CodegenBackendError(f"unsupported bool scalar op: {name}")
+    raise ScalarFunctionError(f"unsupported bool scalar op: {name}")
 
 
-_SCALAR_TYPES: Dict[torch.dtype, _ScalarTypeInfo] = {
-    torch.float32: _ScalarTypeInfo(
-        torch_dtype=torch.float32,
-        c_type=_CODEGEN_DTYPES[torch.float32].c_type,
-        prefix=_CODEGEN_DTYPES[torch.float32].scalar_prefix,
-        suffix=_CODEGEN_DTYPES[torch.float32].suffix,
+_SCALAR_TYPES: Dict[ScalarType, _ScalarTypeInfo] = {
+    ScalarType.F32: _ScalarTypeInfo(
+        c_type="float",
+        prefix="ref_scalar_f32_",
+        suffix="f32",
         is_float=True,
         is_bool=False,
         is_signed=True,
         is_small_int=False,
         bits=None,
     ),
-    torch.float64: _ScalarTypeInfo(
-        torch_dtype=torch.float64,
-        c_type=_CODEGEN_DTYPES[torch.float64].c_type,
-        prefix=_CODEGEN_DTYPES[torch.float64].scalar_prefix,
-        suffix=_CODEGEN_DTYPES[torch.float64].suffix,
+    ScalarType.F64: _ScalarTypeInfo(
+        c_type="double",
+        prefix="ref_scalar_f64_",
+        suffix="f64",
         is_float=True,
         is_bool=False,
         is_signed=True,
         is_small_int=False,
         bits=None,
     ),
-    torch.int8: _ScalarTypeInfo(
-        torch_dtype=torch.int8,
-        c_type=_CODEGEN_DTYPES[torch.int8].c_type,
-        prefix=_CODEGEN_DTYPES[torch.int8].scalar_prefix,
-        suffix=_CODEGEN_DTYPES[torch.int8].suffix,
+    ScalarType.I8: _ScalarTypeInfo(
+        c_type="int8_t",
+        prefix="ref_scalar_i8_",
+        suffix="i8",
         is_float=False,
         is_bool=False,
         is_signed=True,
         is_small_int=True,
         bits=8,
     ),
-    torch.int16: _ScalarTypeInfo(
-        torch_dtype=torch.int16,
-        c_type=_CODEGEN_DTYPES[torch.int16].c_type,
-        prefix=_CODEGEN_DTYPES[torch.int16].scalar_prefix,
-        suffix=_CODEGEN_DTYPES[torch.int16].suffix,
+    ScalarType.I16: _ScalarTypeInfo(
+        c_type="int16_t",
+        prefix="ref_scalar_i16_",
+        suffix="i16",
         is_float=False,
         is_bool=False,
         is_signed=True,
         is_small_int=True,
         bits=16,
     ),
-    torch.int32: _ScalarTypeInfo(
-        torch_dtype=torch.int32,
-        c_type=_CODEGEN_DTYPES[torch.int32].c_type,
-        prefix=_CODEGEN_DTYPES[torch.int32].scalar_prefix,
-        suffix=_CODEGEN_DTYPES[torch.int32].suffix,
+    ScalarType.I32: _ScalarTypeInfo(
+        c_type="int32_t",
+        prefix="ref_scalar_i32_",
+        suffix="i32",
         is_float=False,
         is_bool=False,
         is_signed=True,
         is_small_int=False,
         bits=32,
     ),
-    torch.int64: _ScalarTypeInfo(
-        torch_dtype=torch.int64,
-        c_type=_CODEGEN_DTYPES[torch.int64].c_type,
-        prefix=_CODEGEN_DTYPES[torch.int64].scalar_prefix,
-        suffix=_CODEGEN_DTYPES[torch.int64].suffix,
+    ScalarType.I64: _ScalarTypeInfo(
+        c_type="int64_t",
+        prefix="ref_scalar_i64_",
+        suffix="i64",
         is_float=False,
         is_bool=False,
         is_signed=True,
         is_small_int=False,
         bits=64,
     ),
-    torch.uint8: _ScalarTypeInfo(
-        torch_dtype=torch.uint8,
-        c_type=_CODEGEN_DTYPES[torch.uint8].c_type,
-        prefix=_CODEGEN_DTYPES[torch.uint8].scalar_prefix,
-        suffix=_CODEGEN_DTYPES[torch.uint8].suffix,
+    ScalarType.U8: _ScalarTypeInfo(
+        c_type="uint8_t",
+        prefix="ref_scalar_u8_",
+        suffix="u8",
         is_float=False,
         is_bool=False,
         is_signed=False,
         is_small_int=True,
         bits=8,
     ),
-    torch.uint16: _ScalarTypeInfo(
-        torch_dtype=torch.uint16,
-        c_type=_CODEGEN_DTYPES[torch.uint16].c_type,
-        prefix=_CODEGEN_DTYPES[torch.uint16].scalar_prefix,
-        suffix=_CODEGEN_DTYPES[torch.uint16].suffix,
+    ScalarType.U16: _ScalarTypeInfo(
+        c_type="uint16_t",
+        prefix="ref_scalar_u16_",
+        suffix="u16",
         is_float=False,
         is_bool=False,
         is_signed=False,
         is_small_int=True,
         bits=16,
     ),
-    torch.uint32: _ScalarTypeInfo(
-        torch_dtype=torch.uint32,
-        c_type=_CODEGEN_DTYPES[torch.uint32].c_type,
-        prefix=_CODEGEN_DTYPES[torch.uint32].scalar_prefix,
-        suffix=_CODEGEN_DTYPES[torch.uint32].suffix,
+    ScalarType.U32: _ScalarTypeInfo(
+        c_type="uint32_t",
+        prefix="ref_scalar_u32_",
+        suffix="u32",
         is_float=False,
         is_bool=False,
         is_signed=False,
         is_small_int=False,
         bits=32,
     ),
-    torch.uint64: _ScalarTypeInfo(
-        torch_dtype=torch.uint64,
-        c_type=_CODEGEN_DTYPES[torch.uint64].c_type,
-        prefix=_CODEGEN_DTYPES[torch.uint64].scalar_prefix,
-        suffix=_CODEGEN_DTYPES[torch.uint64].suffix,
+    ScalarType.U64: _ScalarTypeInfo(
+        c_type="uint64_t",
+        prefix="ref_scalar_u64_",
+        suffix="u64",
         is_float=False,
         is_bool=False,
         is_signed=False,
         is_small_int=False,
         bits=64,
     ),
-    torch.bool: _ScalarTypeInfo(
-        torch_dtype=torch.bool,
-        c_type=_CODEGEN_DTYPES[torch.bool].c_type,
-        prefix=_CODEGEN_DTYPES[torch.bool].scalar_prefix,
-        suffix=_CODEGEN_DTYPES[torch.bool].suffix,
+    ScalarType.BOOL: _ScalarTypeInfo(
+        c_type="bool",
+        prefix="ref_scalar_bool_",
+        suffix="bool",
         is_float=False,
         is_bool=True,
         is_signed=False,
@@ -1818,19 +1814,7 @@ _SCALAR_TYPES: Dict[torch.dtype, _ScalarTypeInfo] = {
 }
 
 
-_SCALAR_TYPE_BY_ENUM: Mapping[ScalarType, _ScalarTypeInfo] = {
-    ScalarType.F32: _SCALAR_TYPES[torch.float32],
-    ScalarType.F64: _SCALAR_TYPES[torch.float64],
-    ScalarType.I8: _SCALAR_TYPES[torch.int8],
-    ScalarType.I16: _SCALAR_TYPES[torch.int16],
-    ScalarType.I32: _SCALAR_TYPES[torch.int32],
-    ScalarType.I64: _SCALAR_TYPES[torch.int64],
-    ScalarType.U8: _SCALAR_TYPES[torch.uint8],
-    ScalarType.U16: _SCALAR_TYPES[torch.uint16],
-    ScalarType.U32: _SCALAR_TYPES[torch.uint32],
-    ScalarType.U64: _SCALAR_TYPES[torch.uint64],
-    ScalarType.BOOL: _SCALAR_TYPES[torch.bool],
-}
+_SCALAR_TYPE_BY_ENUM: Mapping[ScalarType, _ScalarTypeInfo] = _SCALAR_TYPES
 
 
 _CONVERSION_SOURCE_BY_FUNCTION: Mapping[ScalarFunction, ScalarType] = {
@@ -1870,10 +1854,10 @@ def validate_scalar_function_supported_ops() -> None:
     }
     conversion_aliases = {"from_f32", "to_f32"}
     categories = {
-        "float": _supported_ops(_SCALAR_TYPES[torch.float32]),
-        "bool": _supported_ops(_SCALAR_TYPES[torch.bool]),
-        "signed_int": _supported_ops(_SCALAR_TYPES[torch.int8]),
-        "unsigned_int": _supported_ops(_SCALAR_TYPES[torch.uint8]),
+        "float": _supported_ops(_SCALAR_TYPES[ScalarType.F32]),
+        "bool": _supported_ops(_SCALAR_TYPES[ScalarType.BOOL]),
+        "signed_int": _supported_ops(_SCALAR_TYPES[ScalarType.I8]),
+        "unsigned_int": _supported_ops(_SCALAR_TYPES[ScalarType.U8]),
     }
     errors: List[str] = []
     for category, supported in categories.items():
@@ -1899,13 +1883,15 @@ def _parse_scalar_name(function_name: str) -> tuple[_ScalarTypeInfo, str]:
     for info in _SCALAR_TYPES.values():
         if function_name.startswith(info.prefix):
             return info, function_name[len(info.prefix) :]
-    raise CodegenBackendError(f"unknown scalar function requested: {function_name}")
+    raise ScalarFunctionError(f"unknown scalar function requested: {function_name}")
 
 
 def _generate_scalar(function_name: str) -> _GeneratedScalar:
     dtype_info, op_name = _parse_scalar_name(function_name)
     if _normalize_op_name(op_name) not in _supported_ops(dtype_info):
-        raise CodegenBackendError(f"unsupported scalar op {op_name} for {dtype_info.suffix}")
+        raise ScalarFunctionError(
+            f"unsupported scalar op {op_name} for {dtype_info.suffix}"
+        )
     if dtype_info.is_float:
         generated = _float_from_ops(dtype_info, op_name)
     elif dtype_info.is_bool:
@@ -1941,23 +1927,23 @@ def _function_name_for_key(key: ScalarFunctionKey) -> str:
             }:
                 target_info = _SCALAR_TYPE_BY_ENUM[key.return_type]
                 return f"{target_info.prefix}from_f32"
-            raise CodegenBackendError(
+            raise ScalarFunctionError(
                 f"unsupported scalar conversion from {source_type.value} to {key.return_type.value}"
             )
         if source_type == ScalarType.BOOL:
             if key.return_type == ScalarType.F32:
                 source_info = _SCALAR_TYPE_BY_ENUM[source_type]
                 return f"{source_info.prefix}to_f32"
-            raise CodegenBackendError(
+            raise ScalarFunctionError(
                 f"unsupported scalar conversion from {source_type.value} to {key.return_type.value}"
             )
-        raise CodegenBackendError(
+        raise ScalarFunctionError(
             f"unsupported scalar conversion from {source_type.value} to {key.return_type.value}"
         )
     op_name = key.function.value
     dtype_info = _SCALAR_TYPE_BY_ENUM[key.return_type]
     if _normalize_op_name(op_name) not in _supported_ops(dtype_info):
-        raise CodegenBackendError(
+        raise ScalarFunctionError(
             f"unsupported scalar op {op_name} for {dtype_info.suffix}"
         )
     return f"{dtype_info.prefix}{op_name}"

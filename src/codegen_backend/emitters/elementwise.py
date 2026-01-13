@@ -15,6 +15,7 @@ from codegen_backend.emitters.base import (
 from codegen_backend.kinds import KernelEmitRequest
 from shared.scalar_functions import (
     ScalarFunction,
+    ScalarFunctionError,
     ScalarFunctionKey,
     ScalarType,
 )
@@ -77,7 +78,7 @@ class ElementwiseEmitter(KindEmitterBase):
         if registry is not None:
             try:
                 scalar_function = ScalarFunction.from_op_name(op_spec.name)
-            except CodegenBackendError:
+            except (CodegenBackendError, ScalarFunctionError):
                 scalar_function = None
         op_kind = op_spec.kind.value
         if elementwise_kind == "clamp_tensor":
