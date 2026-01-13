@@ -6,6 +6,11 @@ from codegen_backend.errors import CodegenBackendError
 from codegen_backend.dtypes import _CodegenDType
 from codegen_backend.emitters.base import KindEmitterBase, _format_array_suffix
 from codegen_backend.kinds import KernelEmitRequest
+from codegen_backend.scalar_functions import (
+    ScalarFunction,
+    ScalarFunctionKey,
+    ScalarType,
+)
 from codegen_backend.specs import _OpSpec
 from codegen_backend.templates import get_template_env
 
@@ -16,6 +21,7 @@ def _write_pdist_kernel(
     input_shape: Sequence[int],
     output_shape: Sequence[int],
     dtype: _CodegenDType,
+    sqrt_fn: str,
 ) -> List[str]:
     pdist_template = get_template_env().get_template("pdist_kernel.c.j2")
     n, m = input_shape
@@ -31,7 +37,7 @@ def _write_pdist_kernel(
         n=n,
         m=m,
         c_type=dtype.c_type,
-        sqrt_fn=f"{dtype.scalar_prefix}sqrt",
+        sqrt_fn=sqrt_fn,
     )
     return rendered.strip().splitlines()
 
@@ -42,12 +48,19 @@ class PdistEmitter(KindEmitterBase):
         dtype = req.dtype
         if op_spec is None or dtype is None:
             raise CodegenBackendError("pdist requires op spec and dtype")
+        sqrt_fn = f"{dtype.scalar_prefix}sqrt"
         if req.scalar_registry is not None:
-            req.scalar_registry.register(f"{dtype.scalar_prefix}sqrt")
+            sqrt_fn = req.scalar_registry.request(
+                ScalarFunctionKey(
+                    ScalarFunction.SQRT,
+                    ScalarType.from_torch_dtype(dtype.torch_dtype),
+                )
+            )
         return _write_pdist_kernel(
             req.node_index,
             op_spec,
             req.input_shapes[0],
             req.output_shape,
             dtype,
+            sqrt_fn,
         )

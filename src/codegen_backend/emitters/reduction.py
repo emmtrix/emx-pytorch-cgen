@@ -14,6 +14,11 @@ from codegen_backend.emitters.base import (
 )
 from codegen_backend.indexing import _emit_strided_access
 from codegen_backend.kinds import KernelEmitRequest
+from codegen_backend.scalar_functions import (
+    ScalarFunction,
+    ScalarFunctionKey,
+    ScalarType,
+)
 from codegen_backend.specs import _OpSpec
 from codegen_backend.templates import get_template_env
 
@@ -122,6 +127,7 @@ def _write_std_kernel(
     reduction_dims: Tuple[int, ...],
     keepdim: bool,
     dtype: _CodegenDType,
+    sqrt_fn: str,
     *,
     unbiased: bool,
 ) -> List[str]:
@@ -155,10 +161,8 @@ def _write_std_kernel(
     for dim in reduction_dims:
         reduction_count *= input_shape[dim]
     acc_type = dtype.c_type
-    sqrt_fn = f"{dtype.scalar_prefix}sqrt"
     if dtype.torch_dtype is torch.bool or dtype.torch_dtype in _INTEGER_CODEGEN_DTYPES:
         acc_type = "float"
-        sqrt_fn = "ref_scalar_f32_sqrt"
     rendered = std_template.render(
         signature=signature,
         input_rank=input_rank,
@@ -253,6 +257,8 @@ def _write_norm_kernel(
     reduction_dims: Tuple[int, ...],
     keepdim: bool,
     dtype: _CodegenDType,
+    abs_fn: str,
+    pow_fn: str,
     *,
     p_value: float,
 ) -> List[str]:
@@ -283,13 +289,9 @@ def _write_norm_kernel(
             c_type=dtype.c_type,
         )
     acc_type = dtype.c_type
-    abs_fn = f"{dtype.scalar_prefix}abs"
-    pow_fn = f"{dtype.scalar_prefix}pow"
     is_zero_p = math.isclose(p_value, 0.0)
     if dtype.torch_dtype is torch.bool or dtype.torch_dtype in _INTEGER_CODEGEN_DTYPES:
         acc_type = "float"
-        abs_fn = "ref_scalar_f32_abs"
-        pow_fn = "ref_scalar_f32_pow"
         input_access = f"(float){input_access}"
     if dtype.torch_dtype is torch.float64:
         p_literal = _format_scalar_literal(p_value, dtype)
@@ -331,6 +333,7 @@ def _write_reduction_kernel(
     reduction_dims: Tuple[int, ...],
     keepdim: bool,
     dtype: _CodegenDType,
+    isnan_fn: str | None,
 ) -> List[str]:
     reduction_template = get_template_env().get_template("sum_kernel.c.j2")
     config = _REDUCTION_CONFIG[op_spec.name]
@@ -389,7 +392,6 @@ def _write_reduction_kernel(
             c_type=dtype.c_type,
         )
     compare_op = None
-    isnan_fn = None
     if op_spec.name == "max":
         minmax_name = "amax"
     elif op_spec.name == "min":
@@ -403,8 +405,6 @@ def _write_reduction_kernel(
             "init_value": init_value_config,
             "post_op": None,
         }
-        if dtype.torch_dtype in (torch.float32, torch.float64):
-            isnan_fn = f"{dtype.scalar_prefix}isnan"
     reduction_count = 1
     for dim in reduction_dims:
         reduction_count *= input_shape[dim]
@@ -457,31 +457,78 @@ class ReductionEmitter(KindEmitterBase):
     def emit(self, req: KernelEmitRequest) -> List[str]:
         reduction_dims = req.reduction_dims or ()
         keepdim = bool(req.keepdim)
+        sqrt_fn = f"{req.dtype.scalar_prefix}sqrt"
+        abs_fn = f"{req.dtype.scalar_prefix}abs"
+        pow_fn = f"{req.dtype.scalar_prefix}pow"
+        isnan_fn = None
+        if req.op_spec.name == "std" and (
+            req.dtype.torch_dtype is torch.bool
+            or req.dtype.torch_dtype in _INTEGER_CODEGEN_DTYPES
+        ):
+            sqrt_fn = "ref_scalar_f32_sqrt"
+        if req.op_spec.name == "norm" and (
+            req.dtype.torch_dtype is torch.bool
+            or req.dtype.torch_dtype in _INTEGER_CODEGEN_DTYPES
+        ):
+            abs_fn = "ref_scalar_f32_abs"
+            pow_fn = "ref_scalar_f32_pow"
+        if req.op_spec.name in {"max", "min", "amax", "amin"} and (
+            req.dtype.torch_dtype in (torch.float32, torch.float64)
+        ):
+            isnan_fn = f"{req.dtype.scalar_prefix}isnan"
         if req.scalar_registry is not None:
             if req.op_spec.name == "std":
                 if (
                     req.dtype.torch_dtype is torch.bool
                     or req.dtype.torch_dtype in _INTEGER_CODEGEN_DTYPES
                 ):
-                    req.scalar_registry.register("ref_scalar_f32_sqrt")
+                    sqrt_fn = req.scalar_registry.request(
+                        ScalarFunctionKey(
+                            ScalarFunction.SQRT,
+                            ScalarType.F32,
+                        )
+                    )
                 else:
-                    req.scalar_registry.register(
-                        f"{req.dtype.scalar_prefix}sqrt"
+                    sqrt_fn = req.scalar_registry.request(
+                        ScalarFunctionKey(
+                            ScalarFunction.SQRT,
+                            ScalarType.from_torch_dtype(req.dtype.torch_dtype),
+                        )
                     )
             elif req.op_spec.name == "norm":
                 if (
                     req.dtype.torch_dtype is torch.bool
                     or req.dtype.torch_dtype in _INTEGER_CODEGEN_DTYPES
                 ):
-                    req.scalar_registry.register("ref_scalar_f32_abs")
-                    req.scalar_registry.register("ref_scalar_f32_pow")
+                    abs_fn = req.scalar_registry.request(
+                        ScalarFunctionKey(
+                            ScalarFunction.ABS,
+                            ScalarType.F32,
+                        )
+                    )
+                    pow_fn = req.scalar_registry.request(
+                        ScalarFunctionKey(
+                            ScalarFunction.POW,
+                            ScalarType.F32,
+                        )
+                    )
                 else:
-                    req.scalar_registry.register(f"{req.dtype.scalar_prefix}abs")
-                    req.scalar_registry.register(f"{req.dtype.scalar_prefix}pow")
+                    return_type = ScalarType.from_torch_dtype(
+                        req.dtype.torch_dtype
+                    )
+                    abs_fn = req.scalar_registry.request(
+                        ScalarFunctionKey(ScalarFunction.ABS, return_type)
+                    )
+                    pow_fn = req.scalar_registry.request(
+                        ScalarFunctionKey(ScalarFunction.POW, return_type)
+                    )
             elif req.op_spec.name in {"max", "min", "amax", "amin"}:
                 if req.dtype.torch_dtype in (torch.float32, torch.float64):
-                    req.scalar_registry.register(
-                        f"{req.dtype.scalar_prefix}isnan"
+                    isnan_fn = req.scalar_registry.request(
+                        ScalarFunctionKey(
+                            ScalarFunction.ISNAN,
+                            ScalarType.from_torch_dtype(req.dtype.torch_dtype),
+                        )
                     )
         if req.op_spec.name == "std":
             return _write_std_kernel(
@@ -494,6 +541,7 @@ class ReductionEmitter(KindEmitterBase):
                 reduction_dims,
                 keepdim,
                 req.dtype,
+                sqrt_fn,
                 unbiased=bool(req.params.get("unbiased", True)),
             )
         if req.op_spec.name == "var":
@@ -520,6 +568,8 @@ class ReductionEmitter(KindEmitterBase):
                 reduction_dims,
                 keepdim,
                 req.dtype,
+                abs_fn,
+                pow_fn,
                 p_value=float(req.params.get("p_value", 2.0)),
             )
         return _write_reduction_kernel(
@@ -532,4 +582,5 @@ class ReductionEmitter(KindEmitterBase):
             reduction_dims,
             keepdim,
             req.dtype,
+            isnan_fn,
         )

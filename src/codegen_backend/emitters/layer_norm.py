@@ -7,6 +7,11 @@ from codegen_backend.dtypes import _CodegenDType
 from codegen_backend.emitters.base import KindEmitterBase, _format_array_suffix
 from codegen_backend.errors import CodegenBackendError
 from codegen_backend.kinds import KernelEmitRequest
+from codegen_backend.scalar_functions import (
+    ScalarFunction,
+    ScalarFunctionKey,
+    ScalarType,
+)
 from codegen_backend.specs import _OpSpec
 from codegen_backend.templates import get_template_env
 
@@ -20,6 +25,7 @@ def _write_layer_norm_kernel(
     weight_shape: Sequence[int] | None,
     bias_shape: Sequence[int] | None,
     dtype: _CodegenDType,
+    sqrt_fn: str,
     eps: float,
     has_weight: bool,
     has_bias: bool,
@@ -54,7 +60,7 @@ def _write_layer_norm_kernel(
         outer_size=outer_size,
         inner_size=inner_size,
         c_type=dtype.c_type,
-        sqrt_fn=f"{dtype.scalar_prefix}sqrt",
+        sqrt_fn=sqrt_fn,
         eps=_format_scalar_literal(eps, dtype),
         has_weight=has_weight,
         has_bias=has_bias,
@@ -72,8 +78,14 @@ class LayerNormEmitter(KindEmitterBase):
         dtype = req.dtype
         if op_spec is None or dtype is None:
             raise CodegenBackendError("layer_norm requires op spec and dtype")
+        sqrt_fn = f"{dtype.scalar_prefix}sqrt"
         if req.scalar_registry is not None:
-            req.scalar_registry.register(f"{dtype.scalar_prefix}sqrt")
+            sqrt_fn = req.scalar_registry.request(
+                ScalarFunctionKey(
+                    ScalarFunction.SQRT,
+                    ScalarType.from_torch_dtype(dtype.torch_dtype),
+                )
+            )
         has_weight = bool(req.params.get("has_weight", False))
         has_bias = bool(req.params.get("has_bias", False))
         weight_shape = req.input_shapes[1] if has_weight else None
@@ -81,12 +93,13 @@ class LayerNormEmitter(KindEmitterBase):
         return _write_layer_norm_kernel(
             req.node_index,
             op_spec,
-        req.input_shapes[0],
-        req.output_shape,
-        tuple(req.params.get("normalized_shape", ())),
-        weight_shape,
-        bias_shape,
-        dtype,
+            req.input_shapes[0],
+            req.output_shape,
+            tuple(req.params.get("normalized_shape", ())),
+            weight_shape,
+            bias_shape,
+            dtype,
+            sqrt_fn,
             float(req.params.get("eps", 1e-5)),
             has_weight,
             has_bias,
