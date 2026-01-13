@@ -250,6 +250,12 @@ def build_supported_ops() -> dict[str, _OpSpec]:
         torch.ops.aten._cdist_forward,
         torch.ops.aten._cdist_forward.default,
     ).build()
+    registry.register_op("nll_loss", kind=OpKind.NLL_LOSS).targets(
+        torch.ops.aten.nll_loss,
+        torch.ops.aten.nll_loss.default,
+        torch.ops.aten.nll_loss_nd,
+        torch.ops.aten.nll_loss_nd.default,
+    ).build()
     registry.register_op("nonzero", kind=OpKind.NONZERO).targets(
         torch.nonzero,
         torch.ops.aten.nonzero,

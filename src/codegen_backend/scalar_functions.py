@@ -2045,7 +2045,7 @@ def _supported_ops(dtype_info: _ScalarTypeInfo) -> Set[str]:
 
 def validate_scalar_function_supported_ops() -> None:
     scalar_ops = {
-        function.value
+        _normalize_op_name(function.value)
         for function in ScalarFunction
         if not function.value.startswith("convert_from_")
     }

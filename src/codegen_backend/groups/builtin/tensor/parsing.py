@@ -166,6 +166,54 @@ def parse_index_select_args(
     return input_arg, dim, index
 
 
+def parse_nll_loss_args(
+    node: torch.fx.Node,
+) -> Tuple[object, object, object, object, object]:
+    if len(node.args) > 5:
+        raise CodegenBackendError("codegen nll_loss expects at most five inputs")
+    if len(node.args) < 2:
+        raise CodegenBackendError("codegen nll_loss expects input and target")
+    input_arg = node.args[0]
+    target = node.args[1] if len(node.args) > 1 else None
+    weight = node.args[2] if len(node.args) > 2 else None
+    reduction = node.args[3] if len(node.args) > 3 else None
+    ignore_index = node.args[4] if len(node.args) > 4 else None
+    if node.kwargs:
+        if "target" in node.kwargs:
+            if target is not None:
+                raise error_kwarg_specified_once("nll_loss", "target")
+            target = node.kwargs["target"]
+        if "weight" in node.kwargs:
+            if weight is not None:
+                raise error_kwarg_specified_once("nll_loss", "weight")
+            weight = node.kwargs["weight"]
+        if "reduction" in node.kwargs:
+            if reduction is not None:
+                raise error_kwarg_specified_once("nll_loss", "reduction")
+            reduction = node.kwargs["reduction"]
+        if "ignore_index" in node.kwargs:
+            if ignore_index is not None:
+                raise error_kwarg_specified_once("nll_loss", "ignore_index")
+            ignore_index = node.kwargs["ignore_index"]
+        extra = set(node.kwargs) - {
+            "target",
+            "weight",
+            "reduction",
+            "ignore_index",
+        }
+        if extra:
+            raise CodegenBackendError(
+                f"codegen nll_loss got unexpected kwargs: {sorted(extra)}"
+            )
+    if target is None:
+        raise CodegenBackendError("codegen nll_loss expects target argument")
+    if reduction is None:
+        reduction = 1
+    if ignore_index is None:
+        ignore_index = -100
+    return input_arg, target, weight, reduction, ignore_index
+
+
 def parse_select_scatter_args(
     node: torch.fx.Node,
 ) -> Tuple[object, object, object, object]:

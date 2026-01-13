@@ -38,6 +38,7 @@ from codegen_backend.groups.builtin.tensor.parsing import (
     parse_index_select_args,
     parse_linear_args,
     parse_masked_scatter_args,
+    parse_nll_loss_args,
     parse_scatter_src_args,
     parse_scatter_value_args,
     parse_select_scatter_args,
@@ -1589,6 +1590,119 @@ class TensorOpBuilder:
         )
         return self._finalize_node(
             node, op_node, dtype_info, [input_shape, index_shape]
+        )
+
+    def build_nll_loss(
+        self, node: torch.fx.Node, op_spec: _OpSpec, dtype_info: _CodegenDType
+    ) -> _OpNode:
+        input_arg, target, weight, reduction, ignore_index = parse_nll_loss_args(
+            node
+        )
+        if not isinstance(input_arg, torch.fx.Node) or input_arg not in self._shapes:
+            raise error_expected_tensor(op_spec.name)
+        if not isinstance(target, torch.fx.Node):
+            raise error_expected_tensor(op_spec.name)
+        if self._dtypes[input_arg] is not dtype_info.torch_dtype:
+            raise CodegenBackendError(
+                "codegen nll_loss expects input to match the graph dtype"
+            )
+        if dtype_info.torch_dtype not in (torch.float32, torch.float64):
+            raise CodegenBackendError(
+                "codegen nll_loss supports only float32 or float64 inputs"
+            )
+        input_shape = self._shapes[input_arg]
+        target_shape = self._shapes.get(target)
+        if len(input_shape) < 1:
+            raise CodegenBackendError(
+                "codegen nll_loss expects input to have at least 1 dimension"
+            )
+        if node.target in {
+            torch.ops.aten.nll_loss,
+            torch.ops.aten.nll_loss.default,
+        } and len(input_shape) > 2:
+            raise CodegenBackendError(
+                "codegen nll_loss expects input to be 1D or 2D"
+            )
+        reduction_value = parse_constant_int(
+            op_spec.name, "reduction", reduction
+        )
+        if reduction_value not in (0, 1, 2):
+            raise CodegenBackendError(
+                "codegen nll_loss expects reduction to be 0, 1, or 2"
+            )
+        ignore_index_value = parse_constant_int(
+            op_spec.name, "ignore_index", ignore_index
+        )
+        class_dim = 0 if len(input_shape) == 1 else 1
+        expected_target_shape = (
+            ()
+            if len(input_shape) == 1
+            else (input_shape[0], *input_shape[2:])
+        )
+        target_value = None
+        if target_shape is None:
+            if len(input_shape) != 1 or target not in self._scalar_values:
+                raise error_expected_tensor(op_spec.name)
+            target_value = parse_constant_int(
+                op_spec.name, "target", self._scalar_values[target]
+            )
+            target_shape = ()
+        if target_value is None:
+            if self._dtypes[target] not in _EMBEDDING_INDEX_DTYPES:
+                raise CodegenBackendError(
+                    "codegen nll_loss expects target dtype to be int32 or int64"
+                )
+            if tuple(target_shape) != expected_target_shape:
+                raise CodegenBackendError(
+                    "codegen nll_loss expects target shape to match input without class dim"
+                )
+        elif target_shape != expected_target_shape:
+            raise CodegenBackendError(
+                "codegen nll_loss expects target shape to match input without class dim"
+            )
+        inputs = [input_arg]
+        input_shapes = [input_shape]
+        has_target_tensor = target_value is None
+        if has_target_tensor:
+            inputs.append(target)
+            input_shapes.append(target_shape)
+        has_weight = False
+        if weight is not None:
+            if not isinstance(weight, torch.fx.Node) or weight not in self._shapes:
+                raise error_expected_tensor(op_spec.name)
+            weight_shape = self._shapes[weight]
+            if len(weight_shape) != 1:
+                raise CodegenBackendError(
+                    "codegen nll_loss expects weight to be a 1D tensor"
+                )
+            expected_weight = input_shape[class_dim]
+            if weight_shape[0] != expected_weight:
+                raise CodegenBackendError(
+                    "codegen nll_loss expects weight size to match class dimension"
+                )
+            if self._dtypes[weight] is not dtype_info.torch_dtype:
+                raise CodegenBackendError(
+                    "codegen nll_loss expects weight to match input dtype"
+                )
+            inputs.append(weight)
+            input_shapes.append(weight_shape)
+            has_weight = True
+        op_node = _OpNode(
+            node=node,
+            spec=op_spec,
+            inputs=inputs,
+            output_shape=(),
+            inplace_input=None,
+            params={
+                "reduction": reduction_value,
+                "ignore_index": ignore_index_value,
+                "has_weight": has_weight,
+                "has_target_tensor": has_target_tensor,
+                "target_value": target_value,
+            },
+        )
+        return self._finalize_node(
+            node, op_node, dtype_info, input_shapes
         )
 
     def build_index_put(
