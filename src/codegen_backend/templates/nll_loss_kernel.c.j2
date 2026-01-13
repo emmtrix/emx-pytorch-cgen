@@ -1,0 +1,42 @@
+{{ signature }}
+{% if reduction == 0 %}
+{%- for dim in range(output_rank) %}
+for (ssize_t i{{ dim }} = 0; i{{ dim }} < {{ output_shape[dim] }}; ++i{{ dim }}) {
+{%- endfor %}
+ssize_t cls = (ssize_t)({{ target_access }});
+if (cls == {{ ignore_index }}) {
+    {{ output_access }} = {{ zero_literal }};
+} else {
+    {{ acc_type }} w = {{ weight_access if has_weight else one_literal }};
+    {{ output_access }} = -({{ input_access }}) * w;
+}
+{%- for _ in range(output_rank) %}
+}
+{%- endfor %}
+}
+{% else %}
+{{ acc_type }} sum = {{ zero_literal }};
+{{ acc_type }} total_weight = {{ zero_literal }};
+{%- for dim in range(target_rank) %}
+for (ssize_t i{{ dim }} = 0; i{{ dim }} < {{ target_shape[dim] }}; ++i{{ dim }}) {
+{%- endfor %}
+ssize_t cls = (ssize_t)({{ target_access }});
+if (cls != {{ ignore_index }}) {
+    {{ acc_type }} w = {{ weight_access if has_weight else one_literal }};
+    sum += -({{ input_access }}) * w;
+    total_weight += w;
+}
+{%- for _ in range(target_rank) %}
+}
+{%- endfor %}
+if ({{ reduction }} == 1) {
+    if (total_weight == {{ zero_literal }}) {
+        {{ output_access }} = {{ nan_literal }};
+    } else {
+        {{ output_access }} = sum / total_weight;
+    }
+} else {
+    {{ output_access }} = sum;
+}
+}
+{% endif %}

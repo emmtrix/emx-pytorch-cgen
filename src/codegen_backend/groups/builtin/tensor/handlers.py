@@ -34,6 +34,7 @@ from codegen_backend.emitters.layer_norm_backward import LayerNormBackwardEmitte
 from codegen_backend.emitters.linear import LinearEmitter
 from codegen_backend.emitters.matmul import MatmulEmitter
 from codegen_backend.emitters.masked_scatter import MaskedScatterEmitter
+from codegen_backend.emitters.nll_loss import NllLossEmitter
 from codegen_backend.emitters.nonzero import NonzeroEmitter
 from codegen_backend.emitters.pad import PadEmitter
 from codegen_backend.emitters.pdist import PdistEmitter
@@ -441,6 +442,26 @@ class GatherHandler(OpKindHandler):
         input_shapes: Sequence[Tuple[int, ...]],
     ) -> Tuple[int, ...]:
         return input_shapes[1]
+
+
+class NllLossHandler(OpKindHandler):
+    def emit(
+        self, node_index: int, op_node: _OpNode, graph: _GenericGraph
+    ) -> List[str]:
+        return self._emit_standard(node_index, op_node, graph)
+
+    def infer_shapes(
+        self,
+        op_node: _OpNode,
+        input_shapes: Sequence[Tuple[int, ...]],
+    ) -> Tuple[int, ...]:
+        input_shape = input_shapes[0]
+        reduction = int(op_node.p("reduction", 1))
+        if len(input_shape) <= 1:
+            return ()
+        if reduction == 0:
+            return (input_shape[0], *input_shape[2:])
+        return ()
 
 
 class IndexPutHandler(OpKindHandler):
@@ -1799,6 +1820,11 @@ def build_handlers(context: TensorContext) -> Dict[OpKind, OpKindHandler]:
             GatherEmitter(),
             builder=_build_with_dtype(context, "build_gather"),
         ),
+        OpKind.NLL_LOSS: NllLossHandler(
+            context,
+            NllLossEmitter(),
+            builder=_build_with_dtype(context, "build_nll_loss"),
+        ),
         OpKind.INDEX_PUT: IndexPutHandler(
             context,
             IndexPutEmitter(),
@@ -2013,6 +2039,7 @@ def build_kind_handler_registrations() -> Dict[OpKind, "KindHandlerRegistration"
             SelectScatterHandler, SelectScatterEmitter
         ),
         OpKind.SCATTER: KindHandlerRegistration(ScatterHandler, ScatterEmitter),
+        OpKind.NLL_LOSS: KindHandlerRegistration(NllLossHandler, NllLossEmitter),
         OpKind.NONZERO: KindHandlerRegistration(
             _BackendNonzeroHandler, NonzeroEmitter
         ),

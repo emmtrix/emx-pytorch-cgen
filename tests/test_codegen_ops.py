@@ -354,6 +354,8 @@ CODEGEN_ATEN_OPS = [
     torch.ops.aten.select.int,
     torch.ops.aten.narrow.default,
     torch.ops.aten.nonzero.default,
+    torch.ops.aten.nll_loss.default,
+    torch.ops.aten.nll_loss_nd.default,
     torch.ops.aten.slice.Tensor,
     torch.ops.aten.expand.default,
     torch.ops.aten.transpose.int,
@@ -696,6 +698,8 @@ CODEGEN_SPECIAL_TEST_OPS = [
     torch.ops.aten._embedding_bag.default,
     torch.ops.aten.embedding_dense_backward.default,
     torch.ops.aten.max_pool3d_with_indices.default,
+    torch.ops.aten.nll_loss.default,
+    torch.ops.aten.nll_loss_nd.default,
     torch.ops.aten.native_group_norm.default,
     torch.ops.aten.native_group_norm_backward.default,
     torch.ops.aten.native_layer_norm_backward.default,
@@ -1081,6 +1085,54 @@ class TestCodegenSpecialOps(TestCase):
         result = compiled(input_tensor)
         torch.testing.assert_close(result[0], expected[0])
         torch.testing.assert_close(result[1], expected[1])
+
+    def test_codegen_nll_loss(self):
+        input_tensor = torch.log_softmax(torch.randn(2, 3), 1)
+        target = torch.tensor([1, 0])
+        weight = torch.tensor([1.0, 0.5, 2.0])
+        ignore_index = 1
+        for reduction in (0, 1, 2):
+            compiled = torch.compile(
+                lambda inp, tgt, w: torch.ops.aten.nll_loss.default(
+                    inp, tgt, w, reduction, ignore_index
+                ),
+                backend=codegen_generic_backend,
+            )
+            expected = torch.ops.aten.nll_loss.default(
+                input_tensor, target, weight, reduction, ignore_index
+            )
+            result = compiled(input_tensor, target, weight)
+            torch.testing.assert_close(result, expected)
+
+        input_nd = torch.log_softmax(torch.randn(2, 3, 4), 1)
+        target_nd = torch.randint(0, 3, (2, 4))
+        target_nd[0, 0] = 1
+        compiled_nd = torch.compile(
+            lambda inp, tgt: torch.ops.aten.nll_loss_nd.default(
+                inp, tgt, None, 2, ignore_index
+            ),
+            backend=codegen_generic_backend,
+        )
+        expected_nd = torch.ops.aten.nll_loss_nd.default(
+            input_nd, target_nd, None, 2, ignore_index
+        )
+        result_nd = compiled_nd(input_nd, target_nd)
+        torch.testing.assert_close(result_nd, expected_nd)
+
+    def test_codegen_nll_loss_rank1(self):
+        input_tensor = torch.log_softmax(torch.randn(5), 0)
+        target = torch.tensor(2)
+        compiled = torch.compile(
+            lambda inp, tgt: torch.ops.aten.nll_loss.default(
+                inp, tgt, None, 1, -100
+            ),
+            backend=codegen_generic_backend,
+        )
+        expected = torch.ops.aten.nll_loss.default(
+            input_tensor, target, None, 1, -100
+        )
+        result = compiled(input_tensor, target)
+        torch.testing.assert_close(result, expected)
 
     def test_codegen_adaptive_avg_pool2d_backward(self):
         grad_output = torch.randn(1, 2, 2, 2)

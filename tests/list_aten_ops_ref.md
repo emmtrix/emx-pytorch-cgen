@@ -1265,13 +1265,13 @@ This list shows all ATen operators, whether the codegen backend supports them, a
 | `new_zeros` | — | 7 |
 | `nextafter` | ✅ | 9 |
 | `nextafter_` | ✅ | — |
-| `nll_loss` | — | — |
+| `nll_loss` | ✅ | — |
 | `nll_loss2d` | — | — |
 | `nll_loss2d_backward` | — | — |
 | `nll_loss2d_forward` | — | — |
 | `nll_loss_backward` | — | — |
 | `nll_loss_forward` | — | — |
-| `nll_loss_nd` | — | — |
+| `nll_loss_nd` | ✅ | — |
 | `nonzero` | ✅ | 24 |
 | `nonzero_numpy` | — | — |
 | `nonzero_static` | — | 60 |
@@ -1721,5 +1721,5 @@ This list shows all ATen operators, whether the codegen backend supports them, a
 
 ## Summary
 - total aten ops: 1714
-- supported by codegen: 302 / 1714 (17.6 %)
-- unsupported by codegen: 1412
+- supported by codegen: 304 / 1714 (17.7 %)
+- unsupported by codegen: 1410

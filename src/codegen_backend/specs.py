@@ -45,6 +45,7 @@ class OpKind(str, Enum):
     GROUP_NORM_BACKWARD = "group_norm_backward"
     PDIST = "pdist"
     CDIST = "cdist"
+    NLL_LOSS = "nll_loss"
     PAD = "pad"
     EMPTY_STRIDED = "empty_strided"
     SCALAR_TENSOR = "scalar_tensor"
